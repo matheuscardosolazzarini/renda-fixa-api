@@ -1,0 +1,20 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: fixedincome-db
+    environment:
+      POSTGRES_DB: fixedincome
+      POSTGRES_USER: fixedincome
+      POSTGRES_PASSWORD: fixedincome
+    ports:
+      - "5432:5432"
+    volumes:
+      - fixedincome-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fixedincome -d fixedincome"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  fixedincome-db-data:
