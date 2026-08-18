@@ -187,6 +187,129 @@ public class FixedIncomeAssetTests
         Assert.Equal(expectedExempt, isExempt);
     }
 
+    [Fact]
+    public void Update_com_aportes_altera_nome_emissor_e_taxa_mantendo_as_datas()
+    {
+        // Arrange
+        var asset = CriarAsset(IndexType.PreFixed, rate: 12m);
+
+        // Act
+        asset.Update("Novo Nome", "Novo Emissor", 15m, asset.IssueDate, asset.MaturityDate, hasPositions: true);
+
+        // Assert
+        Assert.Equal("Novo Nome", asset.Name);
+        Assert.Equal("Novo Emissor", asset.Issuer);
+        Assert.Equal(15m, asset.Rate);
+    }
+
+    [Fact]
+    public void Update_com_aportes_rejeita_alteracao_da_data_de_emissao()
+    {
+        // Arrange
+        var asset = CriarAsset(IndexType.PreFixed, rate: 12m);
+        var novaIssueDate = asset.IssueDate.AddDays(1);
+
+        // Act
+        Action act = () => asset.Update(
+            asset.Name, asset.Issuer, asset.Rate, novaIssueDate, asset.MaturityDate, hasPositions: true);
+
+        // Assert
+        Assert.Throws<DomainException>(act);
+    }
+
+    [Fact]
+    public void Update_com_aportes_rejeita_alteracao_da_data_de_vencimento()
+    {
+        // Arrange
+        var asset = CriarAsset(IndexType.PreFixed, rate: 12m);
+        var novaMaturityDate = asset.MaturityDate.AddDays(1);
+
+        // Act
+        Action act = () => asset.Update(
+            asset.Name, asset.Issuer, asset.Rate, asset.IssueDate, novaMaturityDate, hasPositions: true);
+
+        // Assert
+        Assert.Throws<DomainException>(act);
+    }
+
+    [Fact]
+    public void Update_sem_aportes_permite_alterar_as_datas()
+    {
+        // Arrange
+        var asset = CriarAsset(IndexType.PreFixed, rate: 12m);
+        var novaIssueDate = asset.IssueDate.AddDays(1);
+        var novaMaturityDate = asset.MaturityDate.AddDays(1);
+
+        // Act
+        asset.Update(asset.Name, asset.Issuer, asset.Rate, novaIssueDate, novaMaturityDate, hasPositions: false);
+
+        // Assert
+        Assert.Equal(novaIssueDate, asset.IssueDate);
+        Assert.Equal(novaMaturityDate, asset.MaturityDate);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Update_com_nome_vazio_ou_em_branco_e_rejeitado(string name)
+    {
+        // Arrange
+        var asset = CriarAsset(IndexType.PreFixed, rate: 12m);
+
+        // Act
+        Action act = () => asset.Update(
+            name, asset.Issuer, asset.Rate, asset.IssueDate, asset.MaturityDate, hasPositions: false);
+
+        // Assert
+        Assert.Throws<DomainException>(act);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Update_com_emissor_vazio_ou_em_branco_e_rejeitado(string issuer)
+    {
+        // Arrange
+        var asset = CriarAsset(IndexType.PreFixed, rate: 12m);
+
+        // Act
+        Action act = () => asset.Update(
+            asset.Name, issuer, asset.Rate, asset.IssueDate, asset.MaturityDate, hasPositions: false);
+
+        // Assert
+        Assert.Throws<DomainException>(act);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-5)]
+    public void Update_com_taxa_menor_ou_igual_a_zero_e_rejeitada(decimal rate)
+    {
+        // Arrange
+        var asset = CriarAsset(IndexType.PreFixed, rate: 12m);
+
+        // Act
+        Action act = () => asset.Update(
+            asset.Name, asset.Issuer, rate, asset.IssueDate, asset.MaturityDate, hasPositions: false);
+
+        // Assert
+        Assert.Throws<DomainException>(act);
+    }
+
+    [Fact]
+    public void Update_com_vencimento_anterior_ou_igual_a_emissao_e_rejeitado()
+    {
+        // Arrange
+        var asset = CriarAsset(IndexType.PreFixed, rate: 12m);
+
+        // Act
+        Action act = () => asset.Update(
+            asset.Name, asset.Issuer, asset.Rate, asset.IssueDate, asset.IssueDate, hasPositions: false);
+
+        // Assert
+        Assert.Throws<DomainException>(act);
+    }
+
     private static FixedIncomeAsset CriarAsset(IndexType indexType, decimal rate, AssetType assetType = AssetType.Cdb)
     {
         return new FixedIncomeAsset(

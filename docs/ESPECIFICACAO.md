@@ -85,6 +85,12 @@ independentemente do prazo.
 **RN-05 — Aporte fora da vigência.** Aporte com data anterior à emissão ou posterior ao
 vencimento é rejeitado.
 
+**RN-06 — Alteração de título com aportes.** Um título que já possui aportes registrados
+não pode ter `IssueDate` nem `MaturityDate` alteradas. Permitir isso tornaria
+retroativamente inválido um aporte que era válido no momento do registro, violando a
+RN-05 sem que ninguém tenha feito nada errado. `Name`, `Issuer` e `Rate` permanecem
+alteráveis em qualquer situação.
+
 ## Endpoints
 
 | Método | Rota | Descrição |

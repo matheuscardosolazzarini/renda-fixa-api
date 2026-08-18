@@ -23,6 +23,52 @@ public class FixedIncomeAsset : BaseEntity
         DateOnly issueDate,
         DateOnly maturityDate)
     {
+        EnsureValid(name, issuer, rate, issueDate, maturityDate);
+
+        Name = name;
+        Issuer = issuer;
+        AssetType = assetType;
+        IndexType = indexType;
+        Rate = rate;
+        IssueDate = issueDate;
+        MaturityDate = maturityDate;
+    }
+
+    // Construtor privado sem parâmetros, para materialização pelo EF Core.
+    private FixedIncomeAsset()
+    {
+    }
+
+    // RN-06: título com aportes não pode ter IssueDate nem MaturityDate alteradas, pois
+    // isso tornaria retroativamente inválido um aporte que era válido no momento do
+    // registro. AssetType e IndexType não são alteráveis por decisão de escopo: mudar a
+    // natureza do título equivale a criar outro. O parâmetro hasPositions vem do caso de
+    // uso, que consulta o repositório — a entidade não tem acesso ao banco, mas a decisão
+    // de bloquear a alteração permanece no domínio.
+    public void Update(
+        string name,
+        string issuer,
+        decimal rate,
+        DateOnly issueDate,
+        DateOnly maturityDate,
+        bool hasPositions)
+    {
+        if (hasPositions && (issueDate != IssueDate || maturityDate != MaturityDate))
+        {
+            throw new DomainException("Não é possível alterar IssueDate ou MaturityDate de um título com aportes.");
+        }
+
+        EnsureValid(name, issuer, rate, issueDate, maturityDate);
+
+        Name = name;
+        Issuer = issuer;
+        Rate = rate;
+        IssueDate = issueDate;
+        MaturityDate = maturityDate;
+    }
+
+    private static void EnsureValid(string name, string issuer, decimal rate, DateOnly issueDate, DateOnly maturityDate)
+    {
         if (string.IsNullOrWhiteSpace(name) || name.Length > 120)
         {
             throw new DomainException("Name deve ser não vazio e ter até 120 caracteres.");
@@ -42,19 +88,6 @@ public class FixedIncomeAsset : BaseEntity
         {
             throw new DomainException("MaturityDate deve ser posterior a IssueDate.");
         }
-
-        Name = name;
-        Issuer = issuer;
-        AssetType = assetType;
-        IndexType = indexType;
-        Rate = rate;
-        IssueDate = issueDate;
-        MaturityDate = maturityDate;
-    }
-
-    // Construtor privado sem parâmetros, para materialização pelo EF Core.
-    private FixedIncomeAsset()
-    {
     }
 
     public decimal ResolveAnnualRate(IndexRates rates)
