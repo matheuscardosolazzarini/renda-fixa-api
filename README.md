@@ -21,8 +21,8 @@ Projeto em construção, entregue por fases.
 |---|---|---|
 | F1 | Estrutura da solution e ambiente local | Concluída |
 | F2 | Domínio, invariantes e cálculo | Concluída |
-| F3 | Persistência com EF Core | Em andamento |
-| F4 | Casos de uso e endpoints | Pendente |
+| F3 | Persistência com EF Core | Concluída |
+| F4 | Casos de uso e endpoints | Em andamento |
 | F5 | Consolidação da carteira | Pendente |
 | F6 | CI e empacotamento | Pendente |
 
@@ -90,6 +90,20 @@ resultado é arredondado a centavos em seguida.
 arredondamento; só os valores do `PositionProjection` são arredondados, com
 `MidpointRounding.AwayFromZero`.
 
+**Enums persistidos como texto, não como inteiro.** Valor legível diretamente no banco e
+imune a reordenação futura do enum — persistir o índice significa que inserir um novo valor
+no meio da declaração reinterpreta silenciosamente os dados já gravados.
+
+**Encapsulamento preservado no mapeamento.** `Id` não tem setter público, então o EF Core
+não consegue materializá-lo pela propriedade. A saída foi `PropertyAccessMode.Field` na
+configuração, e não afrouxar o domínio para acomodar o ORM. O mesmo princípio vale para o
+relacionamento: `Position` guarda apenas `AssetId`, sem propriedade de navegação, e a
+configuração declara a chave estrangeira sem introduzir uma.
+
+**Exclusão restrita, não em cascata.** A chave estrangeira usa `Restrict`. Remover um
+título que possui aportes deve falhar de forma explícita, não apagar o histórico do
+investidor em silêncio.
+
 **Sem biblioteca de mock nos testes.** Dublês, quando necessários, são classes
 `private sealed` declaradas no próprio arquivo de teste. Testes de domínio não precisam de
 nenhum, já que as entidades não têm dependência externa.
@@ -109,15 +123,24 @@ dotnet test
 O Compose sobe um PostgreSQL 16 na porta 5432. A API ainda não é executável — o endpoint
 HTTP chega na F4.
 
+A migration inicial está versionada em `src/FixedIncome.Infrastructure/Migrations`, mas
+ainda não é aplicada automaticamente; a execução passa a fazer parte da inicialização da
+API na F4.
+
 ## Testes
 
 ```bash
 dotnet test
 ```
 
-51 testes cobrindo as cinco regras de negócio, incluindo as seis fronteiras exatas da
-tabela regressiva de IR (180, 181, 360, 361, 720 e 721 dias) e cada invariante de entidade
-violada individualmente.
+60 testes, distribuídos assim:
+
+- **51 de domínio** — as cinco regras de negócio, incluindo as seis fronteiras exatas da
+  tabela regressiva de IR (180, 181, 360, 361, 720 e 721 dias) e cada invariante de
+  entidade violada individualmente.
+- **9 de persistência** — repositórios contra provider InMemory, com banco isolado por
+  teste: recuperação por id, id inexistente, ordenação, atualização, remoção e consulta de
+  aportes por título.
 
 ## Processo
 
