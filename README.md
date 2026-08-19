@@ -1,5 +1,7 @@
 # Controle de Investimentos em Renda Fixa
 
+![CI](https://github.com/matheuscardosolazzarini/renda-fixa-api/actions/workflows/ci.yml/badge.svg)
+
 API em .NET 8 para consolidação de carteira de renda fixa, com cálculo de rentabilidade
 líquida de imposto de renda.
 
@@ -13,21 +15,23 @@ investidor.
 Esta API centraliza o cadastro dos títulos, registra os aportes e projeta a posição para
 uma data de referência, já descontado o imposto devido.
 
-## Status
+## Escopo
 
-Projeto em construção, entregue por fases.
+A API cobre o cadastro de títulos, o registro de aportes, a projeção de uma posição para
+uma data e a consolidação da carteira. Nove endpoints, documentados no Swagger.
 
-| Fase | Escopo | Situação |
-|---|---|---|
-| F1 | Estrutura da solution e ambiente local | Concluída |
-| F2 | Domínio, invariantes e cálculo | Concluída |
-| F3 | Persistência com EF Core | Concluída |
-| F4a | Casos de uso e camada de aplicação | Concluída |
-| F4b | Controllers, DI e execução da API | Concluída |
-| F5 | Consolidação da carteira | Em andamento |
-| F6 | CI e empacotamento | Pendente |
+Duas ausências são deliberadas:
 
-A especificação funcional completa está em [`docs/ESPECIFICACAO.md`](docs/ESPECIFICACAO.md).
+**Sem remoção de aporte.** Registro de aporte é histórico financeiro, e histórico se
+corrige por estorno, não por exclusão. Um endpoint de estorno seria a evolução natural;
+um `DELETE` não é.
+
+**Sem cotação real de indexadores.** CDI e IPCA vêm de configuração. Consultar valores
+reais exigiria integração externa, tratamento de indisponibilidade e cache — trabalho que
+não acrescenta nada ao que este projeto se propõe a demonstrar.
+
+A especificação funcional completa está em [`docs/ESPECIFICACAO.md`](docs/ESPECIFICACAO.md),
+e as especificações de cada fase de implementação estão na mesma pasta.
 
 ## Regras de negócio
 
@@ -48,6 +52,11 @@ do prazo.
 
 **Vigência do aporte** — aporte com data anterior à emissão ou posterior ao vencimento do
 título é rejeitado.
+
+**Coerência do consolidado** — os totais da carteira somam os valores já arredondados de
+cada projeção individual, em vez de arredondar a soma dos valores brutos. A diferença é de
+centavos, mas o total precisa fechar exatamente com a lista que o usuário vê; um
+consolidado que não bate com as parcelas é lido como erro do sistema.
 
 **Alteração de título com aportes** — um título que já possui aportes não pode ter as datas
 de emissão ou vencimento alteradas. Permitir isso tornaria retroativamente inválido um
@@ -127,40 +136,57 @@ a decisão permanece no domínio.
 `DomainException` em resposta 400, porque são eles que sabem qual regra foi violada. O
 middleware existe para o que escapar, não para substituir esse tratamento.
 
+**Erros de validação usam o mesmo envelope dos demais.** Por padrão, o `[ApiController]`
+responde com `ProblemDetails` quando rejeita a requisição antes do controller — campo
+ausente, GUID malformado, data inválida. Isso quebraria o contrato justamente no erro mais
+comum de qualquer integração, então a fábrica de resposta de validação foi substituída.
+
 **Sem biblioteca de mock nos testes.** Dublês, quando necessários, são classes
 `private sealed` declaradas no próprio arquivo de teste. Testes de domínio não precisam de
 nenhum, já que as entidades não têm dependência externa.
 
 ## Como executar
 
-Pré-requisitos: .NET 8 SDK e Docker.
+### Com Docker, sem instalar nada
+
+Requer apenas Docker.
 
 ```bash
 git clone https://github.com/matheuscardosolazzarini/renda-fixa-api.git
 cd renda-fixa-api
-docker compose up -d
-dotnet build
-dotnet test
+docker compose up --build -d
 ```
 
-O Compose sobe um PostgreSQL 16 na porta 5432. Aplique a migration uma vez:
+Sobe a API e o PostgreSQL. Aplique a migration uma vez:
 
 ```bash
+docker compose exec api dotnet ef database update
+```
+
+O Swagger fica em `http://localhost:8080/swagger`.
+
+### Localmente, com o SDK
+
+Requer .NET 8 SDK e Docker.
+
+```bash
+docker compose up -d db
+dotnet tool restore
 dotnet ef database update --project src/FixedIncome.Infrastructure --startup-project src/FixedIncome.Api
-```
-
-E suba a aplicação:
-
-```bash
 dotnet run --project src/FixedIncome.Api
 ```
 
-O Swagger fica disponível em `/swagger`, com os oito endpoints documentados. O arquivo
-`src/FixedIncome.Api/FixedIncome.Api.http` traz requisições de exemplo na ordem de um fluxo
-real: criar título, listar, registrar aporte, projetar.
+O `dotnet tool restore` não é opcional: o `dotnet-ef` está fixado como ferramenta local em
+`.config/dotnet-tools.json`, para que a versão usada aqui e no CI seja a mesma.
+
+O arquivo `src/FixedIncome.Api/FixedIncome.Api.http` traz requisições de exemplo na ordem
+de um fluxo real: criar título, listar, registrar aporte, projetar, consolidar.
 
 As taxas de CDI e IPCA em `appsettings.json` são valores fixos de referência, não cotações
 reais.
+
+A migration não é aplicada na inicialização — a decisão está registrada acima e comentada
+no `Program.cs`.
 
 ## Testes
 
@@ -168,21 +194,27 @@ reais.
 dotnet test
 ```
 
-101 testes, distribuídos assim:
+124 testes, executados a cada push pelo GitHub Actions.
 
-- **62 de domínio** — as seis regras de negócio, incluindo as seis fronteiras exatas da
-  tabela regressiva de IR (180, 181, 360, 361, 720 e 721 dias) e cada invariante de
-  entidade violada individualmente.
-- **24 de aplicação** — um arquivo por caso de uso, cobrindo o caminho de sucesso e cada
-  caminho de erro previsto.
-- **9 de persistência** — repositórios contra provider InMemory, com banco isolado por
-  teste.
-- **6 de integração** — a API completa via `WebApplicationFactory`, incluindo o fluxo de
-  criar título, registrar aporte e obter a projeção.
+| Camada | Testes | Linha | Branch |
+|---|---|---|---|
+| Domain | 71 | 94,1% | 94,2% |
+| Application | 28 | 87,8% | 97,2% |
+| Infrastructure | 9 | 82,3% | 100% |
+| Api | 16 | 93,3% | 86,1% |
+
+Migrations são excluídas da medição por serem código gerado pelo `dotnet ef`; mantê-las no
+denominador faria a cobertura de Infrastructure cair para cerca de 30% e comunicar algo
+falso sobre o que está de fato testado.
+
+O domínio cobre as sete regras de negócio, incluindo as seis fronteiras exatas da tabela
+regressiva de IR (180, 181, 360, 361, 720 e 721 dias) e cada invariante de entidade violada
+individualmente.
 
 Além dos testes automatizados, o fluxo foi validado manualmente contra o PostgreSQL real:
 tipos de coluna, persistência dos enums como texto e a chave estrangeira com `RESTRICT`.
-Provider InMemory não verifica nenhuma dessas três coisas.
+Provider InMemory não verifica nenhuma dessas três coisas — teste verde e sistema correto
+são afirmações diferentes.
 
 ## Processo
 
@@ -195,6 +227,11 @@ escrita de testes e revisão de fase — em `.claude/skills/`, para que a assist
 siga o mesmo padrão a cada sessão em vez de depender de instrução repetida.
 
 O histórico de commits reflete essa sequência: spec, implementação, revisão.
+
+Ao final da F5 o projeto passou por uma auditoria completa, registrada em
+[`docs/AUDITORIA-GERAL.md`](docs/AUDITORIA-GERAL.md), que verificou integridade das camadas,
+robustez do contrato HTTP com dezenove entradas malformadas, e cada regra de negócio ponta a
+ponta. Os defeitos encontrados foram corrigidos antes de seguir.
 
 ## Stack
 
