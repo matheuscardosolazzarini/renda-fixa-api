@@ -10,7 +10,12 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+// Dentro do container o banco não está em localhost — a variável de ambiente
+// ConnectionStrings__DefaultConnection (convenção do ASP.NET Core para configuração
+// aninhada, "__" equivale a ":") tem prioridade sobre o appsettings, sem removê-lo: é o
+// que mantém `dotnet run` local funcionando com appsettings.Development.json.
+var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
+    ?? builder.Configuration.GetConnectionString("DefaultConnection")
     ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection não configurada.");
 
 // IndexRatesOptions é resolvida aqui, no ponto de composição, a partir de IOptions e

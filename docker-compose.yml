@@ -16,5 +16,19 @@ services:
       timeout: 5s
       retries: 5
 
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fixedincome-api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__DefaultConnection: "Host=db;Port=5432;Database=fixedincome;Username=fixedincome;Password=fixedincome"
+    ports:
+      - "8080:8080"
+
 volumes:
   fixedincome-db-data:

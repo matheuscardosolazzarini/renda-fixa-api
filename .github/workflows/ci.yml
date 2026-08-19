@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build (Release)
+        run: dotnet build --configuration Release --no-restore
+
+      # A execução conjunta dos quatro projetos de teste em um único `dotnet test` na
+      # solution é instável: o data collector do coverlet pode não concluir o flush do
+      # relatório do projeto mais rápido antes do encerramento do test host, gerando um
+      # coverage.cobertura.xml vazio. Rodar sequencialmente, um projeto por vez, evita a
+      # corrida em vez de mascará-la com continue-on-error.
+      - name: Testes de Domain (com cobertura)
+        run: dotnet test tests/FixedIncome.Domain.Tests --configuration Release --no-build --settings coverlet.runsettings --collect:"XPlat Code Coverage" --results-directory ./coverage/Domain
+
+      - name: Testes de Application (com cobertura)
+        run: dotnet test tests/FixedIncome.Application.Tests --configuration Release --no-build --settings coverlet.runsettings --collect:"XPlat Code Coverage" --results-directory ./coverage/Application
+
+      - name: Testes de Infrastructure (com cobertura)
+        run: dotnet test tests/FixedIncome.Infrastructure.Tests --configuration Release --no-build --settings coverlet.runsettings --collect:"XPlat Code Coverage" --results-directory ./coverage/Infrastructure
+
+      - name: Testes de Api (com cobertura)
+        run: dotnet test tests/FixedIncome.Api.Tests --configuration Release --no-build --settings coverlet.runsettings --collect:"XPlat Code Coverage" --results-directory ./coverage/Api
+
+      - name: Publicar relatório de cobertura
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: ./coverage
