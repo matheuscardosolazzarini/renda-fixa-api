@@ -4,10 +4,11 @@ using Microsoft.EntityFrameworkCore.Design;
 
 namespace FixedIncome.Infrastructure.Context;
 
-// Necessário porque a Api ainda não registra o DbContext via DI (fora do escopo desta
-// fase) e não referencia o pacote Design. As ferramentas do dotnet ef precisam de uma
-// fábrica em tempo de design para descobrir a connection string. A leitura do JSON usa
-// System.Text.Json (BCL) para não exigir o pacote Microsoft.Extensions.Configuration.Json.
+// Desde a F4b a Api registra o DbContext via DI (AddInfrastructure), mas o dotnet ef
+// prioriza um IDesignTimeDbContextFactory quando ele existe, então esta fábrica continua
+// sendo o caminho usado — mantém a resolução em tempo de design independente de construir
+// o host inteiro. A leitura do JSON usa System.Text.Json (BCL) para não exigir o pacote
+// Microsoft.Extensions.Configuration.Json.
 public class FixedIncomeDbContextFactory : IDesignTimeDbContextFactory<FixedIncomeDbContext>
 {
     public FixedIncomeDbContext CreateDbContext(string[] args)

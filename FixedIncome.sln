@@ -21,6 +21,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FixedIncome.Application.Tes
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FixedIncome.Infrastructure.Tests", "tests\FixedIncome.Infrastructure.Tests\FixedIncome.Infrastructure.Tests.csproj", "{689C9EFE-3BF1-48C0-B89F-F4ECFC942C3F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FixedIncome.Api.Tests", "tests\FixedIncome.Api.Tests\FixedIncome.Api.Tests.csproj", "{E5191CDF-1465-45C7-BF63-21A2C5EEE2DC}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -58,6 +60,10 @@ Global
 		{689C9EFE-3BF1-48C0-B89F-F4ECFC942C3F}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{689C9EFE-3BF1-48C0-B89F-F4ECFC942C3F}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{689C9EFE-3BF1-48C0-B89F-F4ECFC942C3F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E5191CDF-1465-45C7-BF63-21A2C5EEE2DC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E5191CDF-1465-45C7-BF63-21A2C5EEE2DC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E5191CDF-1465-45C7-BF63-21A2C5EEE2DC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E5191CDF-1465-45C7-BF63-21A2C5EEE2DC}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{8DC12F42-6BC2-468E-A4E1-D05BAFF46FF2} = {9A669F85-63E0-40CA-8163-AE81E5B20BCE}
@@ -67,5 +73,6 @@ Global
 		{9584B8C3-7973-4913-BCC8-62B9C548F495} = {60D24D09-01B8-4B53-8E56-6C856FFEBBC0}
 		{8DBB2F42-207E-4757-94CD-0C6C95F7C819} = {60D24D09-01B8-4B53-8E56-6C856FFEBBC0}
 		{689C9EFE-3BF1-48C0-B89F-F4ECFC942C3F} = {60D24D09-01B8-4B53-8E56-6C856FFEBBC0}
+		{E5191CDF-1465-45C7-BF63-21A2C5EEE2DC} = {60D24D09-01B8-4B53-8E56-6C856FFEBBC0}
 	EndGlobalSection
 EndGlobal

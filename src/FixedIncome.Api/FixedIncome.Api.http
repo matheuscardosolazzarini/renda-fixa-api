@@ -1,6 +1,60 @@
 @FixedIncome.Api_HostAddress = http://localhost:5124
 
-GET {{FixedIncome.Api_HostAddress}}/weatherforecast/
+### Criar título
+# @name createAsset
+POST {{FixedIncome.Api_HostAddress}}/api/assets
+Content-Type: application/json
+
+{
+  "name": "CDB Banco XYZ",
+  "issuer": "Banco XYZ",
+  "assetType": "Cdb",
+  "indexType": "PreFixed",
+  "rate": 12,
+  "issueDate": "2025-01-01",
+  "maturityDate": "2027-01-01"
+}
+
+### Listar títulos
+GET {{FixedIncome.Api_HostAddress}}/api/assets
 Accept: application/json
+
+### Detalhar título
+GET {{FixedIncome.Api_HostAddress}}/api/assets/{{createAsset.response.body.$.data.id}}
+Accept: application/json
+
+### Atualizar título
+PUT {{FixedIncome.Api_HostAddress}}/api/assets/{{createAsset.response.body.$.data.id}}
+Content-Type: application/json
+
+{
+  "name": "CDB Banco XYZ Prefixado",
+  "issuer": "Banco XYZ",
+  "rate": 13,
+  "issueDate": "2025-01-01",
+  "maturityDate": "2027-01-01"
+}
+
+### Registrar aporte
+# @name createPosition
+POST {{FixedIncome.Api_HostAddress}}/api/positions
+Content-Type: application/json
+
+{
+  "assetId": "{{createAsset.response.body.$.data.id}}",
+  "investedAmount": 1000,
+  "applicationDate": "2025-06-01"
+}
+
+### Listar aportes
+GET {{FixedIncome.Api_HostAddress}}/api/positions
+Accept: application/json
+
+### Projeção do aporte
+GET {{FixedIncome.Api_HostAddress}}/api/positions/{{createPosition.response.body.$.data.id}}/projection?referenceDate=2026-06-01
+Accept: application/json
+
+### Remover título (rejeitado: título já possui aportes)
+DELETE {{FixedIncome.Api_HostAddress}}/api/assets/{{createAsset.response.body.$.data.id}}
 
 ###
