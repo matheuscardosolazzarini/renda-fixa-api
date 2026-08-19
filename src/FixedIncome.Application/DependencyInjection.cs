@@ -15,6 +15,7 @@ public static class DependencyInjection
         services.AddScoped<ICreatePositionUseCase, CreatePositionUseCase>();
         services.AddScoped<IGetAllPositionsUseCase, GetAllPositionsUseCase>();
         services.AddScoped<IGetPositionProjectionUseCase, GetPositionProjectionUseCase>();
+        services.AddScoped<IGetPortfolioSummaryUseCase, GetPortfolioSummaryUseCase>();
 
         return services;
     }

@@ -57,4 +57,8 @@ Accept: application/json
 ### Remover título (rejeitado: título já possui aportes)
 DELETE {{FixedIncome.Api_HostAddress}}/api/assets/{{createAsset.response.body.$.data.id}}
 
+### Resumo consolidado da carteira
+GET {{FixedIncome.Api_HostAddress}}/api/portfolio/summary?referenceDate=2026-06-01
+Accept: application/json
+
 ###

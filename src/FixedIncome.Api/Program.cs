@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using FixedIncome.Api.Middleware;
 using FixedIncome.Application;
 using FixedIncome.Application.Common;
@@ -21,7 +22,11 @@ builder.Services.AddSingleton(sp => sp.GetRequiredService<IOptions<IndexRatesOpt
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(connectionString);
 
-builder.Services.AddControllers();
+// Enums saem como texto no JSON, alinhado à decisão de persistir enums como texto no
+// banco: um valor inserido no meio do enum (ex.: nova posição em AssetType) não pode
+// mudar silenciosamente o contrato numérico da API.
+builder.Services.AddControllers()
+    .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 // Sem isso, o contrato ApiResponse<T> só vale para o que passa pelo model binding: falha de
 // desserialização, GUID/data inválidos na rota ou query e campo obrigatório ausente cairiam

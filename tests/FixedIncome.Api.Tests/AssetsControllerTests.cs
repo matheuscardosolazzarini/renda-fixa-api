@@ -33,6 +33,22 @@ public class AssetsControllerTests : ApiTestBase
     }
 
     [Fact]
+    public async Task Titulo_valido_retorna_asset_type_e_index_type_como_texto_legivel()
+    {
+        // Arrange
+        var request = CriarRequestValido();
+
+        // Act
+        var response = await Client.PostAsJsonAsync("/api/assets", request);
+
+        // Assert
+        using var json = await ReadJsonAsync(response);
+        var data = json.RootElement.GetProperty("data");
+        Assert.Equal("Cdb", data.GetProperty("assetType").GetString());
+        Assert.Equal("PreFixed", data.GetProperty("indexType").GetString());
+    }
+
+    [Fact]
     public async Task Titulo_com_taxa_negativa_retorna_400()
     {
         // Arrange

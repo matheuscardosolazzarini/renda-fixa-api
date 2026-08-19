@@ -91,6 +91,13 @@ retroativamente inválido um aporte que era válido no momento do registro, viol
 RN-05 sem que ninguém tenha feito nada errado. `Name`, `Issuer` e `Rate` permanecem
 alteráveis em qualquer situação.
 
+**RN-07 — Coerência do consolidado.** Os totais do resumo da carteira são obtidos somando
+os valores já arredondados de cada projeção individual, não arredondando a soma dos
+valores brutos. Um total que não fecha com as parcelas exibidas é lido como erro do
+sistema, ainda que a soma sem arredondamento intermediário seja matematicamente mais
+precisa. `TotalNetAmount` é sempre igual a `TotalGrossAmount` menos `TotalTaxAmount`, e
+igual à soma dos `NetAmount` individuais.
+
 ## Endpoints
 
 | Método | Rota | Descrição |
