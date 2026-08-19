@@ -35,10 +35,19 @@ public abstract class ApiTestBase : IDisposable
 
                 services.AddDbContext<FixedIncomeDbContext>(options =>
                     options.UseInMemoryDatabase(databaseName));
+
+                ConfigureTestServices(services);
             });
         });
 
         Client = _factory.CreateClient();
+    }
+
+    // Ponto de extensão para os testes que precisam substituir um caso de uso por um dublê
+    // (ex.: para provocar uma exceção e exercitar o middleware), sem duplicar a configuração
+    // do WebApplicationFactory em cada classe de teste.
+    protected virtual void ConfigureTestServices(IServiceCollection services)
+    {
     }
 
     protected static async Task<JsonDocument> ReadJsonAsync(HttpResponseMessage response)

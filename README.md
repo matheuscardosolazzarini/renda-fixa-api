@@ -22,8 +22,9 @@ Projeto em construção, entregue por fases.
 | F1 | Estrutura da solution e ambiente local | Concluída |
 | F2 | Domínio, invariantes e cálculo | Concluída |
 | F3 | Persistência com EF Core | Concluída |
-| F4 | Casos de uso e endpoints | Em andamento |
-| F5 | Consolidação da carteira | Pendente |
+| F4a | Casos de uso e camada de aplicação | Concluída |
+| F4b | Controllers, DI e execução da API | Concluída |
+| F5 | Consolidação da carteira | Em andamento |
 | F6 | CI e empacotamento | Pendente |
 
 A especificação funcional completa está em [`docs/ESPECIFICACAO.md`](docs/ESPECIFICACAO.md).
@@ -47,6 +48,10 @@ do prazo.
 
 **Vigência do aporte** — aporte com data anterior à emissão ou posterior ao vencimento do
 título é rejeitado.
+
+**Alteração de título com aportes** — um título que já possui aportes não pode ter as datas
+de emissão ou vencimento alteradas. Permitir isso tornaria retroativamente inválido um
+aporte que era válido no momento do registro. Nome, emissor e taxa seguem alteráveis.
 
 Indexadores usam taxas configuradas em `appsettings`. Consultar CDI e IPCA reais exigiria
 integração externa, tratamento de indisponibilidade e cache — trabalho que não acrescenta
@@ -104,6 +109,24 @@ configuração declara a chave estrangeira sem introduzir uma.
 título que possui aportes deve falhar de forma explícita, não apagar o histórico do
 investidor em silêncio.
 
+**Cada camada registra as próprias dependências.** `AddApplication` vive em Application e
+`AddInfrastructure` em Infrastructure; a API apenas compõe. O ponto de entrada não precisa
+conhecer o interior de nenhuma camada para montá-las.
+
+**Migration aplicada manualmente, não na inicialização.** Chamar `Database.Migrate()` no
+startup é conveniente e comum, mas com múltiplas instâncias duas podem migrar ao mesmo
+tempo, e uma falha de migration impede a aplicação de subir. O comando está documentado
+abaixo e é executado uma vez.
+
+**Consulta ao banco fora do domínio, decisão dentro.** A regra de alteração de título com
+aportes precisa saber se existem aportes — informação que só o banco tem. A entidade recebe
+isso como parâmetro (`hasPositions`) em vez de consultar um repositório: o dado vem de fora,
+a decisão permanece no domínio.
+
+**Middleware de exceção como rede de segurança.** Os casos de uso já convertem
+`DomainException` em resposta 400, porque são eles que sabem qual regra foi violada. O
+middleware existe para o que escapar, não para substituir esse tratamento.
+
 **Sem biblioteca de mock nos testes.** Dublês, quando necessários, são classes
 `private sealed` declaradas no próprio arquivo de teste. Testes de domínio não precisam de
 nenhum, já que as entidades não têm dependência externa.
@@ -120,12 +143,24 @@ dotnet build
 dotnet test
 ```
 
-O Compose sobe um PostgreSQL 16 na porta 5432. A API ainda não é executável — o endpoint
-HTTP chega na F4.
+O Compose sobe um PostgreSQL 16 na porta 5432. Aplique a migration uma vez:
 
-A migration inicial está versionada em `src/FixedIncome.Infrastructure/Migrations`, mas
-ainda não é aplicada automaticamente; a execução passa a fazer parte da inicialização da
-API na F4.
+```bash
+dotnet ef database update --project src/FixedIncome.Infrastructure --startup-project src/FixedIncome.Api
+```
+
+E suba a aplicação:
+
+```bash
+dotnet run --project src/FixedIncome.Api
+```
+
+O Swagger fica disponível em `/swagger`, com os oito endpoints documentados. O arquivo
+`src/FixedIncome.Api/FixedIncome.Api.http` traz requisições de exemplo na ordem de um fluxo
+real: criar título, listar, registrar aporte, projetar.
+
+As taxas de CDI e IPCA em `appsettings.json` são valores fixos de referência, não cotações
+reais.
 
 ## Testes
 
@@ -133,14 +168,21 @@ API na F4.
 dotnet test
 ```
 
-60 testes, distribuídos assim:
+101 testes, distribuídos assim:
 
-- **51 de domínio** — as cinco regras de negócio, incluindo as seis fronteiras exatas da
+- **62 de domínio** — as seis regras de negócio, incluindo as seis fronteiras exatas da
   tabela regressiva de IR (180, 181, 360, 361, 720 e 721 dias) e cada invariante de
   entidade violada individualmente.
+- **24 de aplicação** — um arquivo por caso de uso, cobrindo o caminho de sucesso e cada
+  caminho de erro previsto.
 - **9 de persistência** — repositórios contra provider InMemory, com banco isolado por
-  teste: recuperação por id, id inexistente, ordenação, atualização, remoção e consulta de
-  aportes por título.
+  teste.
+- **6 de integração** — a API completa via `WebApplicationFactory`, incluindo o fluxo de
+  criar título, registrar aporte e obter a projeção.
+
+Além dos testes automatizados, o fluxo foi validado manualmente contra o PostgreSQL real:
+tipos de coluna, persistência dos enums como texto e a chave estrangeira com `RESTRICT`.
+Provider InMemory não verifica nenhuma dessas três coisas.
 
 ## Processo
 
