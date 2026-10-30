@@ -12,6 +12,11 @@ seguintes.
 
 Ao final de cada alteração, rode `dotnet build` e `dotnet test` e corrija o que falhar.
 
+A v2 (F7 em diante) segue a ordem e os critérios de `docs/ROADMAP.md` e é conduzida pelo
+comando `/executar-fase F7` (ou F8, F9, F10), que coordena os agentes de
+`.claude/agents/`. Nenhuma fase da v2 começa com item da seção "Decisões em aberto" da
+especificação pendente para ela.
+
 ## Idioma
 
 Comentários e mensagens de commit em português. Identificadores — classes, métodos,
@@ -57,7 +62,8 @@ xUnit no padrão AAA, com as três seções visualmente separadas.
 Não use Moq nem qualquer biblioteca de mock. Dublês são classes stub declaradas
 `private sealed` dentro do próprio arquivo de teste.
 
-Testes de repositório usam DbContext InMemory.
+Testes de repositório usam DbContext InMemory até a F8. A partir da F9, passam a rodar
+contra PostgreSQL real com Testcontainers.
 
 Nomeie os testes descrevendo o comportamento esperado, não o método chamado.
 Cada regra de negócio da especificação precisa de teste, incluindo os casos de
@@ -69,3 +75,14 @@ Não adicione pacotes NuGet além dos já presentes sem justificar a necessidade
 
 Não crie camadas, abstrações ou padrões que a especificação não pede. Interface com
 uma única implementação só existe quando serve à inversão de dependência entre camadas.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- When graphify-out/graph.json exists, run `graphify query "<question>"` before your first grep, search or source-file read for a codebase question, and put this rule in every subagent prompt that explores code. Read raw files only for lines the graph or an earlier read already located. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+- A committed graphify-out/graph.json is rewritten whole on every build, so a large diff to it in a pull request is expected. Do not flag it as churn or suggest skipping the graph rebuild or its hooks.

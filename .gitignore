@@ -482,3 +482,7 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# graphify: grafo local, reconstruído com `graphify update .`
+graphify-out/
+.claude/settings.json.graphify-bak
