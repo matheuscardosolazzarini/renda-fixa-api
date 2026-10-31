@@ -11,12 +11,17 @@ confere o que voltou e decide se a fase avança. Siga as etapas na ordem. Uma et
 
 ## Quem faz o quê
 
-| Agente | Papel | Quando |
-|---|---|---|
-| `especialista-renda-fixa` | regra de mercado correta, casos de referência, auditoria de cálculo | specs e implementação com cálculo (F7, e qualquer fase que toque cálculo) |
-| `revisor-arquitetura` | camadas, convenções, escopo, qualidade dos testes | toda fase, depois da implementação; em F8 e F9, também na spec |
-| `implementador` | testes primeiro, depois código, um passo por vez | cada passo e cada correção |
-| `verificador-de-fase` | build, testes, cobertura, smoke, critério a critério | fim da fase |
+| Agente | Modelo | Papel | Quando |
+|---|---|---|---|
+| `especialista-renda-fixa` | Opus | regra de mercado correta, casos de referência, auditoria de cálculo | specs e implementação com cálculo (F7, e qualquer fase que toque cálculo) |
+| `revisor-arquitetura` | Opus | camadas, convenções, escopo, qualidade dos testes | toda fase, depois da implementação; em F8 e F9, também na spec |
+| `implementador` | Sonnet (Haiku em passo mecânico) | testes primeiro, depois código, um passo por vez | cada passo e cada correção |
+| `verificador-de-fase` | Sonnet | build, testes, cobertura, smoke, critério a critério | fim da fase |
+
+Raciocínio e revisão ficam com o Opus; execução fica com Sonnet ou Haiku. Passo mecânico é
+aquele sem regra de negócio: DTO, registro em DI, configuração de EF Core, migration,
+controller que só repassa. Nesses, chame o `implementador` com o modelo Haiku. Passo com
+cálculo, regra ou decisão de desenho fica com o Sonnet.
 
 Ao chamar um agente que vai explorar código, inclua no prompt: "use `graphify query` antes
 de buscar ou abrir arquivos, quando `graphify-out/graph.json` existir".
@@ -28,12 +33,16 @@ de buscar ou abrir arquivos, quando `graphify-out/graph.json` existir".
    "Antes de começar" está toda marcada.
 3. Nenhum item de "Decisões em aberto" em `docs/ESPECIFICACAO.md` está pendente para esta
    fase.
-4. A árvore está limpa (`git status`) e atualizada com o remoto (`git fetch` e
-   `git status -sb`).
+4. A árvore está atualizada com o remoto (`git fetch` e `git status -sb`) e não tem
+   alterações fora de `docs/` e `.claude/`. Alterações nessas duas pastas são a preparação da
+   fase (spec, revisão, ajustes de agentes) e entram no commit da fase.
 5. Linha de base: `dotnet build` e `dotnet test` verdes. Anote a contagem de testes.
 6. Se `graphify-out/graph.json` não existir ou estiver desatualizado, rode `graphify update .`.
 
 ## Etapa 1 — Spec de execução
+
+Se a spec já existir com `Status: aprovada` no cabeçalho, as etapas 1 a 3 já foram feitas:
+confirme com o Matheus e vá direto para a etapa 4.
 
 Se `docs/SPEC-$ARGUMENTS-EXECUCAO.md` não existir, escreva-a no mesmo formato das
 `SPEC-F1` a `SPEC-F6`: Contexto, Fora de escopo, Regras novas, Implementação em passos

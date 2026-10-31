@@ -8,6 +8,7 @@ public record PortfolioSummaryResponse(
     decimal TotalGrossAmount,
     decimal TotalGrossYield,
     decimal TotalTaxAmount,
+    decimal TotalIofAmount,
     decimal TotalNetAmount,
     int PositionCount,
     IReadOnlyList<PortfolioSummaryResponse.AssetTypeSummaryResponse> ByAssetType)
@@ -17,6 +18,7 @@ public record PortfolioSummaryResponse(
         summary.TotalGrossAmount,
         summary.TotalGrossYield,
         summary.TotalTaxAmount,
+        summary.TotalIofAmount,
         summary.TotalNetAmount,
         summary.PositionCount,
         summary.ByAssetType.Select(AssetTypeSummaryResponse.FromSummary).ToList());

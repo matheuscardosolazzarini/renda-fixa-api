@@ -11,7 +11,11 @@ public record PositionProjectionResponse(
     decimal TaxRate,
     decimal TaxAmount,
     decimal NetAmount,
-    int ElapsedDays)
+    int ElapsedDays,
+    int BusinessDays,
+    decimal IofRate,
+    decimal IofAmount,
+    bool IsEstimated)
 {
     public static PositionProjectionResponse FromProjection(
         Guid positionId, Guid assetId, PositionProjection projection) => new(
@@ -23,5 +27,9 @@ public record PositionProjectionResponse(
         projection.TaxRate,
         projection.TaxAmount,
         projection.NetAmount,
-        projection.ElapsedDays);
+        projection.ElapsedDays,
+        projection.BusinessDays,
+        projection.IofRate,
+        projection.IofAmount,
+        projection.IsEstimated);
 }

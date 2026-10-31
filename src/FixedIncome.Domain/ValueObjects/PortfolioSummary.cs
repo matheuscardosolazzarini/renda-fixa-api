@@ -7,13 +7,15 @@ public record PortfolioSummary(
     decimal TotalGrossAmount,
     decimal TotalGrossYield,
     decimal TotalTaxAmount,
+    decimal TotalIofAmount,
     decimal TotalNetAmount,
     int PositionCount,
     IReadOnlyList<PortfolioSummary.AssetTypeSummary> ByAssetType)
 {
     // RN-07: os totais somam os valores de PositionProjection já arredondados por
     // Position.Project, sem arredondar a soma bruta — o consolidado precisa fechar
-    // exatamente com as parcelas de projeção individual exibidas ao usuário.
+    // exatamente com as parcelas de projeção individual exibidas ao usuário. Como cada
+    // projeção fecha em bruto - IOF - IR, o consolidado fecha na mesma identidade.
     public static PortfolioSummary Create(IEnumerable<(PositionProjection Projection, AssetType AssetType)> positions)
     {
         var items = positions.ToList();
@@ -44,6 +46,7 @@ public record PortfolioSummary(
             TotalGrossAmount: items.Sum(item => item.Projection.GrossAmount),
             TotalGrossYield: items.Sum(item => item.Projection.GrossYield),
             TotalTaxAmount: items.Sum(item => item.Projection.TaxAmount),
+            TotalIofAmount: items.Sum(item => item.Projection.IofAmount),
             TotalNetAmount: totalNetAmount,
             PositionCount: items.Count,
             ByAssetType: byAssetType);

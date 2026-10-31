@@ -50,7 +50,7 @@ O `docs/ESPECIFICACAO.md` coloca fora do escopo da v1 justamente o IOF e a integ
 - [x] Adicionar F7 a F10 em "Fases" e registrar as novas escolhas em "Decisões técnicas".
 - [x] Atualizar o `CLAUDE.md` onde a convenção muda: os testes de repositório saem do InMemory e passam para o Testcontainers na F9.
 - [x] Fechar as decisões que travavam a F7: PreFixed em base 252, IPCA não divulgado estimado pela última variação publicada e taxas fixas do `appsettings.json` removidas.
-- [ ] Commitar a especificação v2, o `CLAUDE.md`, o ROADMAP e a orquestração em `.claude/`.
+- [x] Commitar a especificação v2, o `CLAUDE.md`, o ROADMAP e a orquestração em `.claude/` (commit 8d9c389).
 
 ## F7 — Indexadores reais e dias úteis
 
@@ -72,14 +72,14 @@ Comece pelo calendário de dias úteis. CDI acumulado, IPCA+ e IOF dependem de c
 ### Critérios de conclusão
 
 - [ ] `SPEC-F7-EXECUCAO.md` commitada antes do primeiro commit de código da fase
-- [ ] `CountBusinessDays` confere em três casos verificados à mão: um período com feriado nacional, a virada de ano e o Carnaval
-- [ ] O job grava CDI e IPCA, e rodar duas vezes no mesmo dia não duplica registros
-- [ ] Se a API do BC cair, a aplicação continua de pé: retry com backoff e erro registrado no log
-- [ ] Um CDB 100% do CDI num período real bate com a Calculadora do Cidadão do BC, com diferença de no máximo R$ 0,01 sobre R$ 1.000
-- [ ] Testes da v1 do PreFixed atualizados para base 252, com valores conferidos à mão e nenhum teste antigo removido sem substituto
-- [ ] IOF testado nos dias 1, 15, 29 e 30, e LCI/LCA pagando IOF mesmo isentas de IR
-- [ ] Cada RN nova tem testes (skill `testes-xunit`), com o cliente HTTP testado por um `HttpMessageHandler` stub `private sealed`, sem biblioteca de mock
-- [ ] README explica as regras novas e traz um exemplo de chamada
+- [x] `CountBusinessDays` confere em três casos verificados à mão: um período com feriado nacional, a virada de ano e o Carnaval
+- [x] O job grava CDI e IPCA, e rodar duas vezes no mesmo dia não duplica registros
+- [x] Se a API do BC cair, a aplicação continua de pé: retry com backoff e erro registrado no log
+- [x] Um CDB 100% do CDI num período real bate com a Calculadora do Cidadão do BC, com diferença de no máximo R$ 0,01 sobre R$ 1.000
+- [x] Testes da v1 do PreFixed atualizados para base 252, com valores conferidos à mão e nenhum teste antigo removido sem substituto
+- [x] IOF testado nos dias 1, 15, 29 e 30, e LCI pagando IOF mesmo isenta de IR (LCA tem IOF zero pelo Decreto 6.306/2007, art. 32, § 2º, V; ver RN-11)
+- [x] Cada RN nova tem testes (skill `testes-xunit`), com o cliente HTTP testado por um `HttpMessageHandler` stub `private sealed`, sem biblioteca de mock
+- [x] README explica as regras novas e traz um exemplo de chamada
 
 ## F8 — CD automatizado e IaC
 

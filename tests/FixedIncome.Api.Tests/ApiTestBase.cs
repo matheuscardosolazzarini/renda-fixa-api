@@ -11,6 +11,7 @@ public abstract class ApiTestBase : IDisposable
 {
     private readonly WebApplicationFactory<Program> _factory;
     protected HttpClient Client { get; }
+    protected IServiceProvider Services => _factory.Services;
 
     protected ApiTestBase()
     {
@@ -22,6 +23,10 @@ public abstract class ApiTestBase : IDisposable
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Development");
+
+            // O job de importação chama o Banco Central: nos testes fica desligado, para
+            // nenhum teste depender da internet.
+            builder.UseSetting("IndexRatesImport:Enabled", "false");
 
             builder.ConfigureServices(services =>
             {
@@ -39,6 +44,13 @@ public abstract class ApiTestBase : IDisposable
                 ConfigureTestServices(services);
             });
         });
+
+        // O InMemory não aplica migrations: EnsureCreated cria o esquema e grava o seed (HasData)
+        // dos feriados, de que o calendário das projeções depende.
+        using (var scope = _factory.Services.CreateScope())
+        {
+            scope.ServiceProvider.GetRequiredService<FixedIncomeDbContext>().Database.EnsureCreated();
+        }
 
         Client = _factory.CreateClient();
     }
