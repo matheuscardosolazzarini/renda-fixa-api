@@ -128,8 +128,8 @@ alteráveis em qualquer situação.
 os valores já arredondados de cada projeção individual, não arredondando a soma dos
 valores brutos. Um total que não fecha com as parcelas exibidas é lido como erro do
 sistema, ainda que a soma sem arredondamento intermediário seja matematicamente mais
-precisa. `TotalNetAmount` é sempre igual a `TotalGrossAmount` menos `TotalTaxAmount`, e
-igual à soma dos `NetAmount` individuais.
+precisa. `TotalNetAmount` é sempre igual a `TotalGrossAmount` menos `TotalTaxAmount` menos
+`TotalIofAmount` (v2), e igual à soma dos `NetAmount` individuais.
 
 **RN-08 — Dias úteis** (v2). Dia útil é qualquer dia de segunda a sexta que não seja feriado
 nacional cadastrado em `Holiday`. A contagem entre duas datas inclui a inicial e exclui a
@@ -149,7 +149,9 @@ fator IPCA é o produto de `1 + IPCA do mês / 100` dos meses cheios do interval
 em dias úteis nos meses parciais. Substitui a soma simples de IPCA e taxa usada na v1. Para
 um mês cuja variação ainda não foi divulgada, usa-se a última variação mensal publicada, e a
 projeção sai marcada como estimada. Quando o IPCA oficial do mês é importado, as projeções
-seguintes passam a usá-lo.
+seguintes passam a usá-lo. A estimativa vale só para meses posteriores ao último publicado:
+mês anterior ao último publicado e sem cotação é falha de importação, e a projeção não é
+calculada, com a resposta informando o mês sem cotação.
 
 **RN-11 — IOF regressivo** (v2). Quando o prazo decorrido (dias corridos da aplicação até a
 data de referência, limitada pela RN-02) for menor que 30 dias, incide IOF sobre o rendimento
@@ -168,10 +170,14 @@ bruto, pela tabela do anexo do Decreto 6.306/2007:
 | 9 | 70% | 19 | 36% | 29 | 3% |
 | 10 | 66% | 20 | 33% | 30 | 0% |
 
-O IOF é apurado antes do IR, e a base do IR passa a ser o rendimento bruto menos o IOF. A
-isenção da RN-04 vale só para o IR: LCI e LCA também pagam IOF. A projeção passa a retornar
+O IOF é apurado antes do IR, e a base do IR passa a ser o rendimento bruto menos o IOF. LCA
+tem IOF zero (Decreto 6.306/2007, art. 32, § 2º, V). A isenção de IR da RN-04 não se estende
+ao IOF da LCI, que paga IOF normalmente, assim como CDB e Tesouro Direto. Rendimento menor ou
+igual a zero não gera IOF nem IR. A projeção passa a retornar
 alíquota e valor de IOF, e a RN-07 se estende ao consolidado:
-`TotalNetAmount = TotalGrossAmount − TotalTaxAmount − TotalIofAmount`.
+`TotalNetAmount = TotalGrossAmount − TotalTaxAmount − TotalIofAmount`. Para isso fechar, cada
+projeção arredonda em ordem: valor bruto, depois IOF, depois IR, e o líquido é a subtração dos
+valores já arredondados.
 
 ## Endpoints
 
@@ -192,6 +198,12 @@ alíquota e valor de IOF, e a RN-07 se estende ao consolidado:
 A projeção retorna valor investido, valor bruto, rendimento, alíquota aplicada, imposto
 devido e valor líquido. Na v2, retorna também alíquota e valor de IOF, e indica se a projeção
 é estimada (RN-10).
+
+Na v2, quando `referenceDate` é omitida na projeção ou no consolidado, a data usada é o dia
+útil seguinte à última cotação de CDI importada, e não a data de hoje, para a consulta padrão
+não falhar por falta da cotação de ontem. No consolidado, uma posição com aporte posterior a
+essa data é projetada na própria data do aporte (rendimento zero, sem exigir cotação). Data
+informada explicitamente e sem cotação continua sendo erro (RN-09).
 
 A F1 previa um health check, mas ele não existe no código da v1. Entra na F8, onde o smoke
 test do deploy depende dele.
