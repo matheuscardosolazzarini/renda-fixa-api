@@ -61,4 +61,76 @@ DELETE {{FixedIncome.Api_HostAddress}}/api/assets/{{createAsset.response.body.$.
 GET {{FixedIncome.Api_HostAddress}}/api/portfolio/summary?referenceDate=2026-06-01
 Accept: application/json
 
+### Cotações de CDI no período (data inicial incluída, final incluída na consulta)
+GET {{FixedIncome.Api_HostAddress}}/api/indexes/Cdi?from=2026-09-14&to=2026-09-18
+Accept: application/json
+
+### Cotações de IPCA no período (uma por mês, com data no dia 1)
+GET {{FixedIncome.Api_HostAddress}}/api/indexes/Ipca?from=2026-01-01&to=2026-09-01
+Accept: application/json
+
+### Indexador sem cotação (rejeitado: PreFixed)
+GET {{FixedIncome.Api_HostAddress}}/api/indexes/PreFixed?from=2026-09-14&to=2026-09-18
+Accept: application/json
+
+### Criar CDB pós-fixado em CDI (rate = % do CDI)
+# @name createCdiAsset
+POST {{FixedIncome.Api_HostAddress}}/api/assets
+Content-Type: application/json
+
+{
+  "name": "CDB Banco XYZ 100% CDI",
+  "issuer": "Banco XYZ",
+  "assetType": "Cdb",
+  "indexType": "Cdi",
+  "rate": 100,
+  "issueDate": "2026-06-01",
+  "maturityDate": "2027-06-01"
+}
+
+### Registrar aporte no CDB em CDI
+# @name createCdiPosition
+POST {{FixedIncome.Api_HostAddress}}/api/positions
+Content-Type: application/json
+
+{
+  "assetId": "{{createCdiAsset.response.body.$.data.id}}",
+  "investedAmount": 1000,
+  "applicationDate": "2026-06-01"
+}
+
+### Projeção do CDB em CDI (exige cotações de CDI cobrindo o período)
+GET {{FixedIncome.Api_HostAddress}}/api/positions/{{createCdiPosition.response.body.$.data.id}}/projection?referenceDate=2026-09-23
+Accept: application/json
+
+### Criar CDB IPCA+ (rate = taxa real anual)
+# @name createIpcaAsset
+POST {{FixedIncome.Api_HostAddress}}/api/assets
+Content-Type: application/json
+
+{
+  "name": "CDB Banco XYZ IPCA+6%",
+  "issuer": "Banco XYZ",
+  "assetType": "Cdb",
+  "indexType": "Ipca",
+  "rate": 6,
+  "issueDate": "2026-01-01",
+  "maturityDate": "2028-01-01"
+}
+
+### Registrar aporte no CDB IPCA+
+# @name createIpcaPosition
+POST {{FixedIncome.Api_HostAddress}}/api/positions
+Content-Type: application/json
+
+{
+  "assetId": "{{createIpcaAsset.response.body.$.data.id}}",
+  "investedAmount": 1000,
+  "applicationDate": "2026-04-01"
+}
+
+### Projeção do CDB IPCA+ (isEstimated indica mês sem IPCA divulgado)
+GET {{FixedIncome.Api_HostAddress}}/api/positions/{{createIpcaPosition.response.body.$.data.id}}/projection?referenceDate=2026-07-01
+Accept: application/json
+
 ###

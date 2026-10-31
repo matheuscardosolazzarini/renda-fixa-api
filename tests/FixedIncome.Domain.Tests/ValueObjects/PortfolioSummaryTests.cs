@@ -19,6 +19,7 @@ public class PortfolioSummaryTests
         Assert.Equal(0m, summary.TotalGrossAmount);
         Assert.Equal(0m, summary.TotalGrossYield);
         Assert.Equal(0m, summary.TotalTaxAmount);
+        Assert.Equal(0m, summary.TotalIofAmount);
         Assert.Equal(0m, summary.TotalNetAmount);
         Assert.Equal(0, summary.PositionCount);
         Assert.Empty(summary.ByAssetType);
@@ -106,11 +107,12 @@ public class PortfolioSummaryTests
     [Fact]
     public void Participacao_percentual_e_zero_para_todos_quando_total_liquido_e_zero()
     {
-        // Arrange
+        // Arrange: fixture artificial que fecha com a identidade bruto - IR - IOF = líquido
+        // (1.000 - 300 - 700 = 0 e 500 - 200 - 300 = 0), como exige a RN-07 estendida.
         var positions = new[]
         {
-            (CriarProjecao(investedAmount: 1_000m, grossAmount: 1_000m, taxAmount: 0m, netAmount: 0m), AssetType.Cdb),
-            (CriarProjecao(investedAmount: 500m, grossAmount: 500m, taxAmount: 0m, netAmount: 0m), AssetType.Lci)
+            (CriarProjecao(investedAmount: 1_000m, grossAmount: 1_000m, taxAmount: 300m, netAmount: 0m, iofAmount: 700m), AssetType.Cdb),
+            (CriarProjecao(investedAmount: 500m, grossAmount: 500m, taxAmount: 200m, netAmount: 0m, iofAmount: 300m), AssetType.Lci)
         };
 
         // Act
@@ -176,12 +178,78 @@ public class PortfolioSummaryTests
         // Assert
         Assert.Equal(2_000.00m, summary.TotalNetAmount);
         Assert.NotEqual(2_000.01m, summary.TotalNetAmount);
-        Assert.Equal(summary.TotalGrossAmount - summary.TotalTaxAmount, summary.TotalNetAmount);
+        Assert.Equal(summary.TotalGrossAmount - summary.TotalTaxAmount - summary.TotalIofAmount, summary.TotalNetAmount);
         Assert.Equal(positions.Sum(p => p.Item1.NetAmount), summary.TotalNetAmount);
     }
 
+    [Fact]
+    public void RN07_total_liquido_fecha_com_bruto_menos_ir_menos_iof_no_caso_de_referencia_7_1()
+    {
+        // Arrange: casos 5.4 (CDB) e 5.5 (LCI), PreFixed 12%, R$ 1.000 cada, dia 15.
+        // O LCI é isento de IR mas paga IOF.
+        var positions = new[]
+        {
+            (CriarProjecao(investedAmount: 1_000m, grossAmount: 1_004.96m, taxAmount: 0.56m, netAmount: 1_001.92m, iofAmount: 2.48m), AssetType.Cdb),
+            (CriarProjecao(investedAmount: 1_000m, grossAmount: 1_004.96m, taxAmount: 0m, netAmount: 1_002.48m, iofAmount: 2.48m), AssetType.Lci)
+        };
+
+        // Act
+        var summary = PortfolioSummary.Create(positions);
+
+        // Assert
+        Assert.Equal(2_000.00m, summary.TotalInvestedAmount);
+        Assert.Equal(2_009.92m, summary.TotalGrossAmount);
+        Assert.Equal(9.92m, summary.TotalGrossYield);
+        Assert.Equal(4.96m, summary.TotalIofAmount);
+        Assert.Equal(0.56m, summary.TotalTaxAmount);
+        Assert.Equal(2_004.40m, summary.TotalNetAmount);
+        Assert.Equal(summary.TotalGrossAmount - summary.TotalTaxAmount - summary.TotalIofAmount, summary.TotalNetAmount);
+    }
+
+    [Fact]
+    public void Participacao_percentual_do_caso_7_1_e_arredondada_a_duas_casas()
+    {
+        // Arrange: 1.001,92 / 2.004,40 = 49,9860% e 1.002,48 / 2.004,40 = 50,0140%.
+        var positions = new[]
+        {
+            (CriarProjecao(investedAmount: 1_000m, grossAmount: 1_004.96m, taxAmount: 0.56m, netAmount: 1_001.92m, iofAmount: 2.48m), AssetType.Cdb),
+            (CriarProjecao(investedAmount: 1_000m, grossAmount: 1_004.96m, taxAmount: 0m, netAmount: 1_002.48m, iofAmount: 2.48m), AssetType.Lci)
+        };
+
+        // Act
+        var summary = PortfolioSummary.Create(positions);
+
+        // Assert
+        Assert.Equal(49.99m, summary.ByAssetType.Single(item => item.AssetType == AssetType.Cdb).Percentage);
+        Assert.Equal(50.01m, summary.ByAssetType.Single(item => item.AssetType == AssetType.Lci).Percentage);
+    }
+
+    [Fact]
+    public void RN07_regressao_B1_projecoes_do_caso_7_2_fecham_com_bruto_menos_ir_menos_iof()
+    {
+        // Arrange: casos 5.6 (CDB) e 5.7 (LCI), dia 29, com os líquidos da coluna C6b
+        // (1.007,14 e 1.009,21). Na coluna C6a a soma dos líquidos dava 2.016,33 e a
+        // identidade quebrava em R$ 0,02.
+        var positions = new[]
+        {
+            (CriarProjecao(investedAmount: 1_000m, grossAmount: 1_009.49m, taxAmount: 2.07m, netAmount: 1_007.14m, iofAmount: 0.28m), AssetType.Cdb),
+            (CriarProjecao(investedAmount: 1_000m, grossAmount: 1_009.49m, taxAmount: 0m, netAmount: 1_009.21m, iofAmount: 0.28m), AssetType.Lci)
+        };
+
+        // Act
+        var summary = PortfolioSummary.Create(positions);
+
+        // Assert
+        Assert.Equal(2_018.98m, summary.TotalGrossAmount);
+        Assert.Equal(0.56m, summary.TotalIofAmount);
+        Assert.Equal(2.07m, summary.TotalTaxAmount);
+        Assert.Equal(2_016.35m, summary.TotalNetAmount);
+        Assert.Equal(summary.TotalGrossAmount - summary.TotalTaxAmount - summary.TotalIofAmount, summary.TotalNetAmount);
+        Assert.NotEqual(2_016.33m, summary.TotalNetAmount);
+    }
+
     private static PositionProjection CriarProjecao(
-        decimal investedAmount, decimal grossAmount, decimal taxAmount, decimal netAmount)
+        decimal investedAmount, decimal grossAmount, decimal taxAmount, decimal netAmount, decimal iofAmount = 0m)
     {
         return new PositionProjection(
             InvestedAmount: investedAmount,
@@ -190,6 +258,10 @@ public class PortfolioSummaryTests
             TaxRate: 0m,
             TaxAmount: taxAmount,
             NetAmount: netAmount,
-            ElapsedDays: 365);
+            ElapsedDays: 365,
+            BusinessDays: 252,
+            IofRate: 0m,
+            IofAmount: iofAmount,
+            IsEstimated: false);
     }
 }

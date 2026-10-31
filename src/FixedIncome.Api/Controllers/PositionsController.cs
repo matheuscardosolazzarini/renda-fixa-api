@@ -47,8 +47,7 @@ public class PositionsController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse<PositionProjectionResponse>), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetProjection(Guid id, [FromQuery] DateOnly? referenceDate)
     {
-        var date = referenceDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
-        var response = await _getPositionProjectionUseCase.ExecuteAsync(id, date);
+        var response = await _getPositionProjectionUseCase.ExecuteAsync(id, referenceDate);
         return StatusCode(response.StatusCode, response);
     }
 }

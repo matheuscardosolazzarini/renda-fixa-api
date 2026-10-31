@@ -1,6 +1,5 @@
 using FixedIncome.Domain.Common;
 using FixedIncome.Domain.Enums;
-using FixedIncome.Domain.ValueObjects;
 
 namespace FixedIncome.Domain.Entities;
 
@@ -88,17 +87,6 @@ public class FixedIncomeAsset : BaseEntity
         {
             throw new DomainException("MaturityDate deve ser posterior a IssueDate.");
         }
-    }
-
-    public decimal ResolveAnnualRate(IndexRates rates)
-    {
-        return IndexType switch
-        {
-            IndexType.PreFixed => Rate,
-            IndexType.Cdi => rates.Cdi * (Rate / 100),
-            IndexType.Ipca => rates.Ipca + Rate,
-            _ => throw new DomainException($"IndexType não suportado: {IndexType}.")
-        };
     }
 
     public bool IsTaxExempt()

@@ -4,7 +4,6 @@ using FixedIncome.Application;
 using FixedIncome.Application.Common;
 using FixedIncome.Infrastructure;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -18,14 +17,9 @@ var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__De
     ?? builder.Configuration.GetConnectionString("DefaultConnection")
     ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection não configurada.");
 
-// IndexRatesOptions é resolvida aqui, no ponto de composição, a partir de IOptions e
-// registrada como instância pura — os casos de uso continuam recebendo a classe pura,
-// conforme decidido na F4a, sem depender de Microsoft.Extensions.Options.
-builder.Services.Configure<IndexRatesOptions>(builder.Configuration.GetSection("IndexRates"));
-builder.Services.AddSingleton(sp => sp.GetRequiredService<IOptions<IndexRatesOptions>>().Value);
-
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(connectionString);
+builder.Services.AddIndexRatesImportJob(builder.Configuration);
 
 // Enums saem como texto no JSON, alinhado à decisão de persistir enums como texto no
 // banco: um valor inserido no meio do enum (ex.: nova posição em AssetType) não pode

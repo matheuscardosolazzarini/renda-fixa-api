@@ -1,7 +1,6 @@
 using FixedIncome.Domain.Common;
 using FixedIncome.Domain.Entities;
 using FixedIncome.Domain.Enums;
-using FixedIncome.Domain.ValueObjects;
 
 namespace FixedIncome.Domain.Tests.Entities;
 
@@ -126,48 +125,6 @@ public class FixedIncomeAssetTests
 
         // Assert
         Assert.Throws<DomainException>(act);
-    }
-
-    [Fact]
-    public void ResolveAnnualRate_prefixado_retorna_a_propria_taxa()
-    {
-        // Arrange
-        var asset = CriarAsset(IndexType.PreFixed, rate: 12m);
-        var rates = new IndexRates(Cdi: 13m, Ipca: 4m);
-
-        // Act
-        var annualRate = asset.ResolveAnnualRate(rates);
-
-        // Assert
-        Assert.Equal(12m, annualRate);
-    }
-
-    [Fact]
-    public void ResolveAnnualRate_cdi_aplica_o_percentual_sobre_o_cdi()
-    {
-        // Arrange
-        var asset = CriarAsset(IndexType.Cdi, rate: 110m); // 110% do CDI
-        var rates = new IndexRates(Cdi: 13m, Ipca: 4m);
-
-        // Act
-        var annualRate = asset.ResolveAnnualRate(rates);
-
-        // Assert
-        Assert.Equal(14.3m, annualRate); // 13 * 1,10
-    }
-
-    [Fact]
-    public void ResolveAnnualRate_ipca_soma_a_taxa_a_variacao_do_ipca()
-    {
-        // Arrange
-        var asset = CriarAsset(IndexType.Ipca, rate: 6m);
-        var rates = new IndexRates(Cdi: 13m, Ipca: 4m);
-
-        // Act
-        var annualRate = asset.ResolveAnnualRate(rates);
-
-        // Assert
-        Assert.Equal(10m, annualRate); // 4 + 6
     }
 
     [Theory]

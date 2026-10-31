@@ -68,6 +68,7 @@ public class PortfolioSummaryFlowTests : ApiTestBase
 
         Assert.Equal(2, summaryData.GetProperty("positionCount").GetInt32());
         Assert.Equal(cdbNetAmount + lciNetAmount, summaryData.GetProperty("totalNetAmount").GetDecimal());
+        Assert.Equal(0m, summaryData.GetProperty("totalIofAmount").GetDecimal());
         var byAssetType = summaryData.GetProperty("byAssetType").EnumerateArray().ToList();
         Assert.Equal(2, byAssetType.Count);
         Assert.Contains(byAssetType, item => item.GetProperty("assetType").GetString() == "Cdb");

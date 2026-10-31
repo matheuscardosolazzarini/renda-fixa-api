@@ -7,4 +7,8 @@ public record PositionProjection(
     decimal TaxRate,
     decimal TaxAmount,
     decimal NetAmount,
-    int ElapsedDays);
+    int ElapsedDays,
+    int BusinessDays,
+    decimal IofRate,
+    decimal IofAmount,
+    bool IsEstimated);

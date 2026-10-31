@@ -1,7 +1,7 @@
 ---
 name: revisor-arquitetura
 description: Revisor de arquitetura e convenções do projeto. Use depois da implementação de cada fase (e em fases de infra ou testes, também na revisão da spec) para conferir camadas, pacotes, escopo, padrões do CLAUDE.md e qualidade dos testes. Só lê e roda comandos de verificação; não edita.
-model: sonnet
+model: opus
 ---
 
 # Revisor de arquitetura
