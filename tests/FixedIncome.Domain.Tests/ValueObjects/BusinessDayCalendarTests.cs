@@ -103,6 +103,95 @@ public class BusinessDayCalendarTests
         Assert.Contains("2030-12-31", exception.Message);
     }
 
+    // B-05: a mensagem cita a data que o usuário enviou (para o fim exclusivo, o próprio fim)
+    // e o período coberto inteiro, num único formato.
+    [Theory]
+    [InlineData("2031-06-01", "Data 2031-06-01 fora do período coberto pelo calendário (2020-01-01 a 2030-12-31).")]
+    [InlineData("2031-01-02", "Data 2031-01-02 fora do período coberto pelo calendário (2020-01-01 a 2030-12-31).")]
+    public void Contagem_com_fim_alem_da_cobertura_cita_a_data_enviada_e_o_periodo_coberto(string end, string expected)
+    {
+        // Arrange
+        var calendar = BuildCalendar();
+
+        // Act
+        Action act = () => calendar.CountBusinessDays(new DateOnly(2030, 12, 30), DateOnly.Parse(end));
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Equal(expected, exception.Message);
+    }
+
+    [Fact]
+    public void Contagem_com_inicio_antes_da_cobertura_cita_a_data_enviada_e_o_periodo_coberto()
+    {
+        // Arrange
+        var calendar = BuildCalendar();
+
+        // Act
+        Action act = () => calendar.CountBusinessDays(new DateOnly(2019, 6, 3), new DateOnly(2020, 1, 2));
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Equal(
+            "Data 2019-06-03 fora do período coberto pelo calendário (2020-01-01 a 2030-12-31).",
+            exception.Message);
+    }
+
+    [Theory]
+    [InlineData("2019-12-31")]
+    [InlineData("2031-01-01")]
+    public void IsBusinessDay_fora_da_cobertura_cita_a_data_enviada_e_o_periodo_coberto(string date)
+    {
+        // Arrange
+        var calendar = BuildCalendar();
+
+        // Act
+        Action act = () => calendar.IsBusinessDay(DateOnly.Parse(date));
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Equal(
+            $"Data {date} fora do período coberto pelo calendário (2020-01-01 a 2030-12-31).",
+            exception.Message);
+    }
+
+    // B-02: o domínio decide o que o calendário cobre; o caso de uso só chama.
+    [Theory]
+    [InlineData("2020-01-01")]
+    [InlineData("2030-12-31")]
+    [InlineData("2026-09-14")]
+    public void EnsureCovers_dentro_do_periodo_coberto_nao_lanca_excecao(string date)
+    {
+        // Arrange
+        var calendar = BuildCalendar();
+
+        // Act
+        var exception = Record.Exception(() => calendar.EnsureCovers(DateOnly.Parse(date), "Data de aporte"));
+
+        // Assert
+        Assert.Null(exception);
+    }
+
+    [Theory]
+    [InlineData("2019-12-31")]
+    [InlineData("2019-06-03")]
+    [InlineData("2031-01-01")]
+    [InlineData("2031-06-01")]
+    public void EnsureCovers_fora_do_periodo_coberto_cita_a_descricao_a_data_e_o_periodo(string date)
+    {
+        // Arrange
+        var calendar = BuildCalendar();
+
+        // Act
+        Action act = () => calendar.EnsureCovers(DateOnly.Parse(date), "Data de aporte");
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Equal(
+            $"Data de aporte {date} fora do período coberto pelo calendário (2020-01-01 a 2030-12-31).",
+            exception.Message);
+    }
+
     [Fact]
     public void Contagem_de_2020_a_2029_confere_com_o_caso_de_referencia_1_4()
     {

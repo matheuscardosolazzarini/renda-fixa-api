@@ -34,6 +34,10 @@ builder.Services.AddControllers()
 // chegar ao controller.
 builder.Services.Configure<ApiBehaviorOptions>(options =>
 {
+    // Sem isso o [ApiController] transforma o 415 (e outros 4xx sem corpo) em ProblemDetails.
+    // Com o mapeamento desligado eles saem vazios e o UseStatusCodePages abaixo escreve o envelope.
+    options.SuppressMapClientErrors = true;
+
     options.InvalidModelStateResponseFactory = context =>
     {
         var fieldMessages = new List<string>();
@@ -118,6 +122,24 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseMiddleware<ExceptionHandlingMiddleware>();
+
+// 404 de rota inexistente, 405 e 415 saem do framework sem corpo. Só respostas vazias passam por
+// aqui: os 404 dos controllers já trazem o ApiResponse e não são sobrescritos.
+app.UseStatusCodePages(async statusCodeContext =>
+{
+    var httpContext = statusCodeContext.HttpContext;
+    var statusCode = httpContext.Response.StatusCode;
+
+    var message = statusCode switch
+    {
+        StatusCodes.Status404NotFound => "Recurso não encontrado.",
+        StatusCodes.Status405MethodNotAllowed => "Método HTTP não permitido para este recurso.",
+        StatusCodes.Status415UnsupportedMediaType => "Tipo de conteúdo não suportado. Envie o corpo como application/json.",
+        _ => "Não foi possível processar a requisição."
+    };
+
+    await httpContext.Response.WriteAsJsonAsync(ApiResponse<object>.Error(statusCode, message));
+});
 
 app.UseHttpsRedirection();
 

@@ -1,3 +1,4 @@
+using System.Globalization;
 using FixedIncome.Domain.Common;
 using FixedIncome.Domain.Entities;
 using FixedIncome.Domain.Enums;
@@ -265,6 +266,123 @@ public class FixedIncomeAssetTests
 
         // Assert
         Assert.Throws<DomainException>(act);
+    }
+
+    // B-01: Rate é numeric(18,6), então o maior valor aceito é 999999999999,999999.
+    [Theory]
+    [InlineData("999999999999.999999")]
+    [InlineData("999999999999")]
+    public void Taxa_no_ultimo_valor_que_cabe_na_coluna_e_aceita(string rate)
+    {
+        // Arrange
+        var value = decimal.Parse(rate, CultureInfo.InvariantCulture);
+
+        // Act
+        var asset = CriarAsset(IndexType.PreFixed, value);
+
+        // Assert
+        Assert.Equal(value, asset.Rate);
+    }
+
+    [Theory]
+    [InlineData("1000000000000")]
+    [InlineData("1000000000000.000001")]
+    [InlineData("1000000000000000")]
+    public void Taxa_a_partir_de_1e12_e_rejeitada_citando_o_limite(string rate)
+    {
+        // Arrange
+        var value = decimal.Parse(rate, CultureInfo.InvariantCulture);
+
+        // Act
+        Action act = () => CriarAsset(IndexType.PreFixed, value);
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Equal("Rate deve ser menor que 1000000000000.", exception.Message);
+    }
+
+    [Theory]
+    [InlineData("1000000000000")]
+    [InlineData("1000000000000000")]
+    public void Update_com_taxa_a_partir_de_1e12_e_rejeitado_e_nao_altera_o_titulo(string rate)
+    {
+        // Arrange
+        var asset = CriarAsset(IndexType.PreFixed, 12m);
+        var value = decimal.Parse(rate, CultureInfo.InvariantCulture);
+
+        // Act
+        Action act = () => asset.Update(
+            asset.Name, asset.Issuer, value, asset.IssueDate, asset.MaturityDate, hasPositions: false);
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Equal("Rate deve ser menor que 1000000000000.", exception.Message);
+        Assert.Equal(12m, asset.Rate);
+    }
+
+    [Fact]
+    public void Update_com_taxa_no_ultimo_valor_que_cabe_na_coluna_e_aceito()
+    {
+        // Arrange
+        var asset = CriarAsset(IndexType.PreFixed, 12m);
+
+        // Act
+        asset.Update(
+            asset.Name, asset.Issuer, 999999999999.999999m, asset.IssueDate, asset.MaturityDate, hasPositions: false);
+
+        // Assert
+        Assert.Equal(999999999999.999999m, asset.Rate);
+    }
+
+    // B-07: Rate guarda 6 casas; mais que isso o banco arredondaria e a resposta ecoaria outro valor.
+    [Theory]
+    [InlineData("12")]
+    [InlineData("12.5")]
+    [InlineData("12.123456")]
+    [InlineData("12.1234560")] // zeros à direita não contam como casa decimal
+    public void Taxa_com_ate_6_casas_decimais_e_aceita(string rate)
+    {
+        // Arrange
+        var value = decimal.Parse(rate, CultureInfo.InvariantCulture);
+
+        // Act
+        var asset = CriarAsset(IndexType.PreFixed, value);
+
+        // Assert
+        Assert.Equal(value, asset.Rate);
+    }
+
+    [Theory]
+    [InlineData("12.1234567")]
+    [InlineData("12.123456789")]
+    [InlineData("0.0000001")]
+    public void Taxa_com_mais_de_6_casas_decimais_e_rejeitada(string rate)
+    {
+        // Arrange
+        var value = decimal.Parse(rate, CultureInfo.InvariantCulture);
+
+        // Act
+        Action act = () => CriarAsset(IndexType.PreFixed, value);
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Equal("Rate deve ter no máximo 6 casas decimais.", exception.Message);
+    }
+
+    [Fact]
+    public void Update_com_taxa_de_mais_de_6_casas_decimais_e_rejeitado()
+    {
+        // Arrange
+        var asset = CriarAsset(IndexType.PreFixed, 12m);
+
+        // Act
+        Action act = () => asset.Update(
+            asset.Name, asset.Issuer, 12.1234567m, asset.IssueDate, asset.MaturityDate, hasPositions: false);
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Equal("Rate deve ter no máximo 6 casas decimais.", exception.Message);
+        Assert.Equal(12m, asset.Rate);
     }
 
     private static FixedIncomeAsset CriarAsset(IndexType indexType, decimal rate, AssetType assetType = AssetType.Cdb)

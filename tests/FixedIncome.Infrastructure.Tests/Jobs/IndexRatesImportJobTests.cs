@@ -100,6 +100,28 @@ public class IndexRatesImportJobTests
         Assert.DoesNotContain(logger.Entries, e => e.Level >= LogLevel.Error);
     }
 
+    [Fact]
+    public async Task Cancelamento_durante_a_execucao_do_caso_de_uso_encerra_o_job_sem_log_de_erro()
+    {
+        // Arrange
+        var useCase = new UseCaseStub { CancelWhenReleased = new TaskCompletionSource() };
+        var logger = new LoggerStub();
+        var job = CreateJob(useCase, logger, LongInterval);
+        await job.StartAsync(CancellationToken.None);
+        await useCase.WaitForCallsAsync(1, WaitLimit);
+
+        // Act
+        // StopAsync cancela o token de forma síncrona antes de aguardar; só então o caso de uso
+        // em andamento lança o cancelamento, como faria ao perceber o desligamento.
+        var stop = job.StopAsync(CancellationToken.None);
+        useCase.CancelWhenReleased.SetResult();
+        await stop;
+
+        // Assert
+        Assert.Equal(TaskStatus.RanToCompletion, job.ExecuteTask!.Status);
+        Assert.DoesNotContain(logger.Entries, e => e.Level >= LogLevel.Error);
+    }
+
     private static IndexRatesImportJob CreateJob(UseCaseStub useCase, LoggerStub logger, TimeSpan interval)
     {
         var services = new ServiceCollection();
@@ -118,11 +140,17 @@ public class IndexRatesImportJobTests
         public int Calls => Volatile.Read(ref _calls);
         public int ThrowOnCalls { get; init; }
         public bool FailResponse { get; init; }
+        public TaskCompletionSource? CancelWhenReleased { get; init; }
 
         public Task<ApiResponse<ImportIndexRatesResponse>> ExecuteAsync()
         {
             var call = Interlocked.Increment(ref _calls);
             _signal.Release();
+
+            if (CancelWhenReleased is not null)
+            {
+                return CancelAfterReleaseAsync(CancelWhenReleased);
+            }
 
             if (call <= ThrowOnCalls)
             {
@@ -132,6 +160,12 @@ public class IndexRatesImportJobTests
             return Task.FromResult(FailResponse
                 ? ApiResponse<ImportIndexRatesResponse>.InternalError("Falha ao importar as cotações de Cdi.")
                 : ApiResponse<ImportIndexRatesResponse>.Ok(new ImportIndexRatesResponse(1, 0, 1)));
+        }
+
+        private static async Task<ApiResponse<ImportIndexRatesResponse>> CancelAfterReleaseAsync(TaskCompletionSource release)
+        {
+            await release.Task;
+            throw new OperationCanceledException();
         }
 
         public async Task WaitForCallsAsync(int count, TimeSpan limit)

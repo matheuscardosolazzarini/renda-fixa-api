@@ -41,7 +41,8 @@ public class ImportIndexRatesUseCase : IImportIndexRatesUseCase
 
     public async Task<ApiResponse<ImportIndexRatesResponse>> ExecuteAsync()
     {
-        var today = DateOnly.FromDateTime(_timeProvider.GetUtcNow().UtcDateTime);
+        // R-01: "até hoje" é a data de Brasília; a UTC entre 21h e 24h já é a do dia seguinte.
+        var today = DateOnly.FromDateTime(_timeProvider.GetLocalNow().DateTime);
 
         var failedTypes = new List<IndexType>();
         var cdiImported = 0;

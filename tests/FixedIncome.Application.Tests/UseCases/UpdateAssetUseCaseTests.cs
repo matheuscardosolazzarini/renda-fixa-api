@@ -90,6 +90,66 @@ public class UpdateAssetUseCaseTests
         Assert.Equal(400, response.StatusCode);
     }
 
+    // B-01: rate numeric(18,6) aceita até 999999999999,999999.
+    [Fact]
+    public async Task Taxa_no_ultimo_valor_que_cabe_na_coluna_atualiza_e_retorna_200()
+    {
+        // Arrange
+        var asset = CriarTitulo();
+        var assetRepository = new FixedIncomeAssetRepositoryStub(asset);
+        var useCase = new UpdateAssetUseCase(assetRepository, new PositionRepositoryStub(Enumerable.Empty<Position>()));
+        var request = new UpdateAssetRequest(
+            asset.Name, asset.Issuer, 999999999999.999999m, asset.IssueDate, asset.MaturityDate);
+
+        // Act
+        var response = await useCase.ExecuteAsync(asset.Id, request);
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.Equal(999999999999.999999m, response.Data!.Rate);
+    }
+
+    [Theory]
+    [InlineData("1000000000000")]
+    [InlineData("1000000000000000")]
+    public async Task Taxa_acima_do_limite_da_coluna_retorna_400_e_nao_grava(string rate)
+    {
+        // Arrange
+        var asset = CriarTitulo();
+        var assetRepository = new FixedIncomeAssetRepositoryStub(asset);
+        var useCase = new UpdateAssetUseCase(assetRepository, new PositionRepositoryStub(Enumerable.Empty<Position>()));
+        var request = new UpdateAssetRequest(
+            asset.Name, asset.Issuer, decimal.Parse(rate), asset.IssueDate, asset.MaturityDate);
+
+        // Act
+        var response = await useCase.ExecuteAsync(asset.Id, request);
+
+        // Assert
+        Assert.Equal(400, response.StatusCode);
+        Assert.Equal("Rate deve ser menor que 1000000000000.", response.Message);
+        Assert.Null(assetRepository.AssetAtualizado);
+    }
+
+    // B-07
+    [Fact]
+    public async Task Taxa_com_mais_de_seis_casas_decimais_retorna_400_e_nao_grava()
+    {
+        // Arrange
+        var asset = CriarTitulo();
+        var assetRepository = new FixedIncomeAssetRepositoryStub(asset);
+        var useCase = new UpdateAssetUseCase(assetRepository, new PositionRepositoryStub(Enumerable.Empty<Position>()));
+        var request = new UpdateAssetRequest(
+            asset.Name, asset.Issuer, 12.1234567m, asset.IssueDate, asset.MaturityDate);
+
+        // Act
+        var response = await useCase.ExecuteAsync(asset.Id, request);
+
+        // Assert
+        Assert.Equal(400, response.StatusCode);
+        Assert.Equal("Rate deve ter no máximo 6 casas decimais.", response.Message);
+        Assert.Null(assetRepository.AssetAtualizado);
+    }
+
     private sealed class FixedIncomeAssetRepositoryStub : IFixedIncomeAssetRepository
     {
         private readonly FixedIncomeAsset? _asset;

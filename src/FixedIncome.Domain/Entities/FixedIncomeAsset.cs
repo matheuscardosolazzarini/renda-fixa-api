@@ -1,3 +1,4 @@
+using System.Globalization;
 using FixedIncome.Domain.Common;
 using FixedIncome.Domain.Enums;
 
@@ -5,6 +6,11 @@ namespace FixedIncome.Domain.Entities;
 
 public class FixedIncomeAsset : BaseEntity
 {
+    // Limites da coluna rate, numeric(18,6): 12 dígitos inteiros e 6 casas decimais. Validar aqui
+    // evita que o banco estoure (500) ou arredonde em silêncio um valor que a resposta ecoaria.
+    public const decimal RateLimit = 1_000_000_000_000m;
+    public const int RateDecimalPlaces = 6;
+
     public string Name { get; private set; } = string.Empty;
     public string Issuer { get; private set; } = string.Empty;
     public AssetType AssetType { get; private set; }
@@ -81,6 +87,16 @@ public class FixedIncomeAsset : BaseEntity
         if (rate <= 0)
         {
             throw new DomainException("Rate deve ser maior que zero.");
+        }
+
+        if (rate >= RateLimit)
+        {
+            throw new DomainException($"Rate deve ser menor que {RateLimit.ToString("0", CultureInfo.InvariantCulture)}.");
+        }
+
+        if (decimal.Round(rate, RateDecimalPlaces) != rate)
+        {
+            throw new DomainException($"Rate deve ter no máximo {RateDecimalPlaces} casas decimais.");
         }
 
         if (maturityDate <= issueDate)

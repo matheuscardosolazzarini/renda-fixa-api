@@ -43,6 +43,79 @@ public class PositionTests
         Assert.Throws<DomainException>(act);
     }
 
+    // B-01: InvestedAmount é numeric(18,2), então o maior valor aceito é 9999999999999999,99.
+    [Theory]
+    [InlineData("9999999999999999.99")]
+    [InlineData("9999999999999999")]
+    public void Valor_investido_no_ultimo_valor_que_cabe_na_coluna_e_aceito(string amount)
+    {
+        // Arrange
+        var asset = CriarAsset();
+        var value = decimal.Parse(amount, CultureInfo.InvariantCulture);
+
+        // Act
+        var position = new Position(asset, value, new DateOnly(2024, 6, 1));
+
+        // Assert
+        Assert.Equal(value, position.InvestedAmount);
+    }
+
+    [Theory]
+    [InlineData("10000000000000000")]
+    [InlineData("10000000000000000.01")]
+    [InlineData("100000000000000000000")]
+    public void Valor_investido_a_partir_de_1e16_e_rejeitado_citando_o_limite(string amount)
+    {
+        // Arrange
+        var asset = CriarAsset();
+        var value = decimal.Parse(amount, CultureInfo.InvariantCulture);
+
+        // Act
+        Action act = () => new Position(asset, value, new DateOnly(2024, 6, 1));
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Equal("InvestedAmount deve ser menor que 10000000000000000.", exception.Message);
+    }
+
+    // B-07: InvestedAmount guarda 2 casas; 10,999 seria gravado como 11,00 e ecoado como 10,999.
+    [Theory]
+    [InlineData("12")]
+    [InlineData("12.5")]
+    [InlineData("12.50")]
+    [InlineData("12.99")]
+    [InlineData("12.500")] // zeros à direita não contam como casa decimal
+    public void Valor_investido_com_ate_2_casas_decimais_e_aceito(string amount)
+    {
+        // Arrange
+        var asset = CriarAsset();
+        var value = decimal.Parse(amount, CultureInfo.InvariantCulture);
+
+        // Act
+        var position = new Position(asset, value, new DateOnly(2024, 6, 1));
+
+        // Assert
+        Assert.Equal(value, position.InvestedAmount);
+    }
+
+    [Theory]
+    [InlineData("10.999")]
+    [InlineData("12.001")]
+    [InlineData("0.001")]
+    public void Valor_investido_com_mais_de_2_casas_decimais_e_rejeitado(string amount)
+    {
+        // Arrange
+        var asset = CriarAsset();
+        var value = decimal.Parse(amount, CultureInfo.InvariantCulture);
+
+        // Act
+        Action act = () => new Position(asset, value, new DateOnly(2024, 6, 1));
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Equal("InvestedAmount deve ter no máximo 2 casas decimais.", exception.Message);
+    }
+
     [Fact]
     public void Aporte_antes_da_emissao_e_rejeitado()
     {

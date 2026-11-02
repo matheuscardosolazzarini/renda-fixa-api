@@ -222,6 +222,11 @@ public class ImportIndexRatesUseCaseTests
         }
 
         public override DateTimeOffset GetUtcNow() => _now;
+
+        // Brasília fixo em UTC-3 (sem horário de verão desde 2019), para os testes não
+        // dependerem do fuso nem do tzdata da máquina.
+        public override TimeZoneInfo LocalTimeZone { get; } = TimeZoneInfo.CreateCustomTimeZone(
+            "America/Sao_Paulo", TimeSpan.FromHours(-3), "Brasília", "Brasília");
     }
 
     private sealed class IndexRateProviderStub : IIndexRateProvider

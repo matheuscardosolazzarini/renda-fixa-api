@@ -9,8 +9,9 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
-        // Relógio injetado para a data atual nunca vir de DateTime.UtcNow; TryAdd deixa os testes trocarem.
-        services.TryAddSingleton(TimeProvider.System);
+        // Relógio injetado para a data atual nunca vir de DateTime.UtcNow, com fuso de Brasília
+        // (R-01); TryAdd deixa os testes trocarem.
+        services.TryAddSingleton<TimeProvider, BrasiliaTimeProvider>();
 
         services.AddScoped<MarketDataLoader>();
 

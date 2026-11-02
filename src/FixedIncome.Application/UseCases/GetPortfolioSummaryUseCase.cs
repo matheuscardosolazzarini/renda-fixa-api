@@ -57,6 +57,17 @@ public class GetPortfolioSummaryUseCase : IGetPortfolioSummaryUseCase
                 }
             }
 
+            // R-02: com data explícita, a posição aportada depois dela não existia na data e fica
+            // fora do consolidado (e do carregamento de mercado), em vez de derrubá-lo com 400.
+            // Sem data informada vale a regra da data padrão, mais abaixo.
+            if (referenceDate is not null)
+            {
+                positions = positions.Where(p => p.ApplicationDate <= referenceDate.Value).ToList();
+            }
+        }
+
+        if (positions.Count > 0)
+        {
             try
             {
                 var defaultDate = referenceDate ?? await ResolveDefaultReferenceDateAsync();
@@ -95,11 +106,12 @@ public class GetPortfolioSummaryUseCase : IGetPortfolioSummaryUseCase
     // Achado I2: sem data, o resumo usa o dia útil seguinte à última cotação de CDI importada, nunca
     // a data de hoje, para o resumo padrão não falhar por falta da cotação de ontem. Sem nenhuma
     // cotação de CDI importada (banco recém-criado, importação ainda não rodou) não há data de
-    // mercado a seguir: usa-se a data de hoje do TimeProvider, e posições em CDI devolvem 400 com a
+    // mercado a seguir: usa-se a data de hoje em Brasília (R-01, nunca a data UTC, que entre 21h e
+    // 24h já é a do dia seguinte), via fuso do TimeProvider, e posições em CDI devolvem 400 com a
     // primeira data sem cotação (RN-09), enquanto as pré-fixadas e IPCA+ seguem calculando.
     private async Task<DateOnly> ResolveDefaultReferenceDateAsync()
     {
         return await _marketDataLoader.GetDefaultReferenceDateAsync()
-            ?? DateOnly.FromDateTime(_timeProvider.GetUtcNow().UtcDateTime);
+            ?? DateOnly.FromDateTime(_timeProvider.GetLocalNow().DateTime);
     }
 }

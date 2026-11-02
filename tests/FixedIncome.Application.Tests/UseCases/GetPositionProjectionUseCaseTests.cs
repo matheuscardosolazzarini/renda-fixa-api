@@ -147,7 +147,10 @@ public class GetPositionProjectionUseCaseTests
 
         // Assert
         Assert.Equal(400, response.StatusCode);
-        Assert.Contains("cobertura do calendário", response.Message);
+        // B-05: cita a data enviada (e não a véspera) e o período coberto inteiro.
+        Assert.Equal(
+            "Data 2031-06-01 fora do período coberto pelo calendário (2025-01-01 a 2030-12-31).",
+            response.Message);
     }
 
     [Fact]
@@ -232,6 +235,121 @@ public class GetPositionProjectionUseCaseTests
         Assert.Equal(1_004.93m, response.Data!.GrossAmount);
     }
 
+    // R-01: caso do QA. CDB pré-fixado de 12% a.a., R$ 1.000 aportados em 2026-10-28, tabela de
+    // CDI vazia. Às 22h37 de 30/10 em Brasília (01h37 UTC de 31/10) a data de hoje é 2026-10-30:
+    // 2 dias corridos e 2 úteis (28 e 29/10), IOF de 93%, bruto 1.000,90, IOF 0,84, IR 0,01 e
+    // líquido 1.000,05 (valores conferidos no QA com referenceDate=2026-10-30).
+    [Fact]
+    public async Task Sem_data_e_sem_cotacao_de_cdi_entre_21h_e_meia_noite_em_brasilia_usa_a_data_de_brasilia()
+    {
+        // Arrange
+        var asset = new FixedIncomeAsset(
+            "QA-R01", "QA-Banco", AssetType.Cdb, IndexType.PreFixed, 12m,
+            new DateOnly(2026, 1, 1), new DateOnly(2030, 12, 31));
+        var position = new Position(asset, 1_000m, new DateOnly(2026, 10, 28));
+        var clock = new TimeProviderStub(new DateTimeOffset(2026, 10, 31, 1, 37, 0, TimeSpan.Zero));
+        var useCase = CriarCaso(position, asset, clock);
+
+        // Act
+        var response = await useCase.ExecuteAsync(position.Id, referenceDate: null);
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.Equal(2, response.Data!.ElapsedDays);
+        Assert.Equal(2, response.Data!.BusinessDays);
+        Assert.Equal(93m, response.Data!.IofRate);
+        Assert.Equal(1_000.90m, response.Data!.GrossAmount);
+        Assert.Equal(0.84m, response.Data!.IofAmount);
+        Assert.Equal(0.01m, response.Data!.TaxAmount);
+        Assert.Equal(1_000.05m, response.Data!.NetAmount);
+    }
+
+    // A janela UTC diferente de Brasília fecha às 03h UTC: a partir daí as datas coincidem.
+    [Theory]
+    [InlineData("2026-10-31T02:59:59Z", 2)]
+    [InlineData("2026-10-31T03:00:00Z", 3)]
+    public async Task Data_de_hoje_muda_para_o_dia_seguinte_so_a_partir_de_meia_noite_em_brasilia(
+        string utcNow, int expectedElapsedDays)
+    {
+        // Arrange
+        var asset = new FixedIncomeAsset(
+            "QA-R01", "QA-Banco", AssetType.Cdb, IndexType.PreFixed, 12m,
+            new DateOnly(2026, 1, 1), new DateOnly(2030, 12, 31));
+        var position = new Position(asset, 1_000m, new DateOnly(2026, 10, 28));
+        var clock = new TimeProviderStub(DateTimeOffset.Parse(utcNow, System.Globalization.CultureInfo.InvariantCulture));
+        var useCase = CriarCaso(position, asset, clock);
+
+        // Act
+        var response = await useCase.ExecuteAsync(position.Id, referenceDate: null);
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.Equal(expectedElapsedDays, response.Data!.ElapsedDays);
+    }
+
+    // B-03: com a data omitida, a mensagem explica de onde veio a data padrão.
+    [Fact]
+    public async Task Sem_data_com_data_padrao_da_ultima_cotacao_anterior_ao_aporte_informa_a_data_padrao_usada()
+    {
+        // Arrange: última cotação de CDI em quinta, 2026-10-29, então a data padrão é sexta, 2026-10-30.
+        var asset = new FixedIncomeAsset(
+            "QA-06", "QA-Banco", AssetType.Cdb, IndexType.PreFixed, 12m,
+            new DateOnly(2026, 1, 1), new DateOnly(2030, 12, 31));
+        var position = new Position(asset, 1_000m, new DateOnly(2026, 10, 31));
+        var useCase = CriarCaso(
+            position, asset, new TimeProviderStub(Now), new IndexRate(IndexType.Cdi, new DateOnly(2026, 10, 29), 0.05m));
+
+        // Act
+        var response = await useCase.ExecuteAsync(position.Id, referenceDate: null);
+
+        // Assert
+        Assert.Equal(400, response.StatusCode);
+        Assert.Equal(
+            "A data de referência padrão (2026-10-30, o dia útil seguinte à última cotação de CDI) "
+            + "é anterior à data de aporte (2026-10-31). Informe referenceDate.",
+            response.Message);
+    }
+
+    [Fact]
+    public async Task Sem_data_e_sem_cotacao_com_data_de_hoje_anterior_ao_aporte_informa_a_data_de_hoje_usada()
+    {
+        // Arrange: sem CDI, a data padrão é a de hoje em Brasília (2026-10-30 às 22h37).
+        var asset = new FixedIncomeAsset(
+            "QA-06", "QA-Banco", AssetType.Cdb, IndexType.PreFixed, 12m,
+            new DateOnly(2026, 1, 1), new DateOnly(2030, 12, 31));
+        var position = new Position(asset, 1_000m, new DateOnly(2026, 10, 31));
+        var clock = new TimeProviderStub(new DateTimeOffset(2026, 10, 31, 1, 37, 0, TimeSpan.Zero));
+        var useCase = CriarCaso(position, asset, clock);
+
+        // Act
+        var response = await useCase.ExecuteAsync(position.Id, referenceDate: null);
+
+        // Assert
+        Assert.Equal(400, response.StatusCode);
+        Assert.Equal(
+            "A data de referência padrão (2026-10-30, a data de hoje em Brasília, pois não há cotação de CDI "
+            + "importada) é anterior à data de aporte (2026-10-31). Informe referenceDate.",
+            response.Message);
+    }
+
+    [Fact]
+    public async Task Data_explicita_anterior_ao_aporte_mantem_a_mensagem_simples()
+    {
+        // Arrange
+        var asset = new FixedIncomeAsset(
+            "QA-06", "QA-Banco", AssetType.Cdb, IndexType.PreFixed, 12m,
+            new DateOnly(2026, 1, 1), new DateOnly(2030, 12, 31));
+        var position = new Position(asset, 1_000m, new DateOnly(2026, 10, 31));
+        var useCase = CriarCaso(position, asset);
+
+        // Act
+        var response = await useCase.ExecuteAsync(position.Id, new DateOnly(2026, 10, 30));
+
+        // Assert
+        Assert.Equal(400, response.StatusCode);
+        Assert.Equal("A data de referência não pode ser anterior à data de aporte.", response.Message);
+    }
+
     [Fact]
     public async Task Data_de_referencia_explicita_nao_e_alterada_pela_ultima_cotacao_de_cdi()
     {
@@ -278,6 +396,11 @@ public class GetPositionProjectionUseCaseTests
         }
 
         public override DateTimeOffset GetUtcNow() => _now;
+
+        // Brasília fixo em UTC-3 (sem horário de verão desde 2019), para os testes não
+        // dependerem do fuso nem do tzdata da máquina.
+        public override TimeZoneInfo LocalTimeZone { get; } = TimeZoneInfo.CreateCustomTimeZone(
+            "America/Sao_Paulo", TimeSpan.FromHours(-3), "Brasília", "Brasília");
     }
 
     private sealed class HolidayRepositoryStub : IHolidayRepository

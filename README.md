@@ -155,7 +155,8 @@ Resposta, com status 200:
 
 Para IPCA, a data de referência é sempre o dia 1 do mês. Por isso o filtro compara com o
 dia 1: `from=2026-01-15` não inclui janeiro. Um período sem cotações devolve 200 com a lista
-vazia. Data inicial posterior à final, PreFixed e indexador inexistente devolvem 400.
+vazia. Data inicial posterior à final, PreFixed e indexador inexistente devolvem 400. O indexador
+vai pelo nome, sem diferenciar maiúsculas; o número do enum (`/api/indexes/1`) também devolve 400.
 
 ## Arquitetura
 
@@ -231,7 +232,9 @@ middleware existe para o que escapar, não para substituir esse tratamento.
 **Erros de validação usam o mesmo envelope dos demais.** Por padrão, o `[ApiController]`
 responde com `ProblemDetails` quando rejeita a requisição antes do controller — campo
 ausente, GUID malformado, data inválida. Isso quebraria o contrato justamente no erro mais
-comum de qualquer integração, então a fábrica de resposta de validação foi substituída.
+comum de qualquer integração, então a fábrica de resposta de validação foi substituída. O mesmo vale
+para 404 de rota inexistente, 405 e 415, que o framework devolve sem corpo ou como `ProblemDetails`:
+são reescritos no envelope por `UseStatusCodePages`, só quando a resposta está vazia.
 
 **Sem biblioteca de mock nos testes.** Dublês, quando necessários, são classes
 `private sealed` declaradas no próprio arquivo de teste. Testes de domínio não precisam de
@@ -249,11 +252,30 @@ cd renda-fixa-api
 docker compose up --build -d
 ```
 
-Sobe a API e o PostgreSQL. Aplique a migration uma vez:
+Sobe a API e o PostgreSQL. Aplique a migration uma vez. A imagem da API só tem o runtime, sem
+o SDK, então o `dotnet ef` roda num contêiner do SDK que compartilha a rede do contêiner do
+banco (`fixedincome-db`), onde o PostgreSQL responde em `localhost:5432`, a mesma conexão que o
+`appsettings.Development.json` já usa:
 
 ```bash
-docker compose exec api dotnet ef database update
+docker run --rm --network container:fixedincome-db -v "${PWD}:/src" -w /src \
+  mcr.microsoft.com/dotnet/sdk:8.0 \
+  sh -c 'dotnet tool restore && dotnet ef database update --project src/FixedIncome.Infrastructure --startup-project src/FixedIncome.Api'
 ```
+
+Execute-o na raiz do repositório, num terminal bash ou PowerShell (no cmd do Windows, troque
+`${PWD}` pelo caminho da pasta). Em PowerShell, escreva o comando numa só linha. A primeira
+execução baixa a imagem do SDK e os pacotes, e leva alguns minutos.
+
+Depois da migration, reinicie a API:
+
+```bash
+docker compose restart api
+```
+
+A API importa as cotações de CDI e IPCA ao subir, antes de a migration existir, e a importação
+falha por falta da tabela. O próximo ciclo só ocorreria 6 horas depois; sem o reinício, a
+projeção de CDI e de IPCA+ falha até lá.
 
 O Swagger fica em `http://localhost:8080/swagger`.
 
@@ -289,14 +311,14 @@ no `Program.cs`.
 dotnet test
 ```
 
-439 testes, executados a cada push pelo GitHub Actions.
+558 testes, executados a cada push pelo GitHub Actions.
 
 | Camada | Testes | Linha | Branch |
 |---|---|---|---|
-| Domain | 251 | 95,5% | 97,9% |
-| Application | 74 | 93,1% | 100% |
-| Infrastructure | 81 | 88,0% | 88,2% |
-| Api | 33 | 94,4% | 91,2% |
+| Domain | 292 | 95,2% | 98,1% |
+| Application | 105 | 92,5% | 98,9% |
+| Infrastructure | 110 | 95,6% | 98,1% |
+| Api | 51 | 96,3% | 89,1% |
 
 Cobertura medida com o coverlet e o `coverlet.runsettings` do CI, projeto a projeto; cada linha da
 tabela traz a cobertura do assembly da própria camada (os assemblies referenciados também são

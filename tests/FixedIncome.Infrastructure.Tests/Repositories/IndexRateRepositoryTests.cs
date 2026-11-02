@@ -1,93 +1,93 @@
+using System.Data.Common;
 using FixedIncome.Domain.Entities;
 using FixedIncome.Domain.Enums;
+using FixedIncome.Infrastructure.Context;
 using FixedIncome.Infrastructure.Repositories;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 
 namespace FixedIncome.Infrastructure.Tests.Repositories;
 
 public class IndexRateRepositoryTests : RepositoryTestBase
 {
+    // O InMemory não executa SQL. Estes testes usam o provedor do PostgreSQL sem banco: os
+    // interceptadores impedem a conexão e capturam o comando. Eles provam o SQL enviado; o efeito
+    // do ON CONFLICT no banco real é verificado pelo race.sh (ver QA-F7.md) e, na F9, por Testcontainers.
     [Fact]
-    public async Task Upsert_com_os_mesmos_dados_duas_vezes_nao_duplica_as_cotacoes()
+    public async Task Upsert_grava_todas_as_cotacoes_num_unico_insert_que_atualiza_o_valor_no_conflito()
     {
         // Arrange
-        var repository = new IndexRateRepository(Context);
-        await repository.UpsertAsync(CriarCotacoesCdi(0.05m, 0.06m));
+        var (contexto, comandos) = CriarContextoSemBanco();
+        using var _ = contexto;
+        var repository = new IndexRateRepository(contexto);
 
         // Act
-        await repository.UpsertAsync(CriarCotacoesCdi(0.05m, 0.06m));
+        await repository.UpsertAsync(CriarCotacoesCdi(0.05m, 0.06m, 0.07m));
 
         // Assert
-        Assert.Equal(2, await Context.IndexRates.CountAsync());
+        var comando = Assert.Single(comandos.Executados);
+        var sql = string.Join(' ', comando.Texto.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        Assert.StartsWith("INSERT INTO index_rate (id, index_type, reference_date, value)", sql);
+        Assert.EndsWith("ON CONFLICT (index_type, reference_date) DO UPDATE SET value = EXCLUDED.value", sql);
     }
 
     [Fact]
-    public async Task Upsert_com_valor_diferente_atualiza_a_cotacao_existente_sem_trocar_o_id()
+    public async Task Upsert_envia_id_indexador_data_e_valor_de_cada_cotacao_como_parametros()
     {
         // Arrange
-        var repository = new IndexRateRepository(Context);
-        var original = new IndexRate(IndexType.Cdi, new DateOnly(2025, 6, 2), 0.05m);
-        await repository.UpsertAsync(new[] { original });
+        var (contexto, comandos) = CriarContextoSemBanco();
+        using var _ = contexto;
+        var repository = new IndexRateRepository(contexto);
+        var cdi = new IndexRate(IndexType.Cdi, new DateOnly(2025, 6, 2), 0.05m);
+        var ipca = new IndexRate(IndexType.Ipca, new DateOnly(2025, 6, 1), 0.35m);
 
         // Act
-        await repository.UpsertAsync(new[] { new IndexRate(IndexType.Cdi, new DateOnly(2025, 6, 2), 0.07m) });
+        await repository.UpsertAsync(new[] { cdi, ipca });
 
         // Assert
-        var stored = await Context.IndexRates.AsNoTracking().SingleAsync();
-        Assert.Equal(original.Id, stored.Id);
-        Assert.Equal(0.07m, stored.Value);
+        var parametros = Assert.Single(comandos.Executados).Parametros;
+        Assert.Equal(new[] { cdi.Id, ipca.Id }, parametros["ids"]);
+        Assert.Equal(new[] { "Cdi", "Ipca" }, parametros["index_types"]);
+        Assert.Equal(new[] { new DateOnly(2025, 6, 2), new DateOnly(2025, 6, 1) }, parametros["reference_dates"]);
+        Assert.Equal(new[] { 0.05m, 0.35m }, parametros["values"]);
     }
 
     [Fact]
-    public async Task Upsert_insere_apenas_as_datas_novas_e_mantem_as_existentes()
+    public async Task Upsert_com_a_mesma_cotacao_repetida_no_lote_envia_so_a_ultima()
     {
         // Arrange
-        var repository = new IndexRateRepository(Context);
-        await repository.UpsertAsync(CriarCotacoesCdi(0.05m, 0.06m));
+        // O PostgreSQL rejeita (21000) um ON CONFLICT DO UPDATE que atinge a mesma linha duas vezes.
+        var (contexto, comandos) = CriarContextoSemBanco();
+        using var _ = contexto;
+        var repository = new IndexRateRepository(contexto);
+        var data = new DateOnly(2025, 6, 2);
 
         // Act
         await repository.UpsertAsync(new[]
         {
-            new IndexRate(IndexType.Cdi, new DateOnly(2025, 6, 3), 0.06m),
-            new IndexRate(IndexType.Cdi, new DateOnly(2025, 6, 4), 0.08m),
+            new IndexRate(IndexType.Cdi, data, 0.05m),
+            new IndexRate(IndexType.Cdi, data, 0.07m),
         });
 
         // Assert
-        var stored = await Context.IndexRates.AsNoTracking().OrderBy(r => r.ReferenceDate).ToListAsync();
-        Assert.Equal(
-            new[] { new DateOnly(2025, 6, 2), new DateOnly(2025, 6, 3), new DateOnly(2025, 6, 4) },
-            stored.Select(r => r.ReferenceDate));
+        var parametros = Assert.Single(comandos.Executados).Parametros;
+        Assert.Equal(new[] { data }, parametros["reference_dates"]);
+        Assert.Equal(new[] { 0.07m }, parametros["values"]);
     }
 
     [Fact]
-    public async Task Upsert_da_mesma_data_para_outro_indexador_nao_altera_a_cotacao_existente()
+    public async Task Upsert_com_colecao_vazia_nao_executa_nenhum_comando()
     {
         // Arrange
-        var repository = new IndexRateRepository(Context);
-        await repository.UpsertAsync(new[] { new IndexRate(IndexType.Cdi, new DateOnly(2025, 6, 1), 0.05m) });
-
-        // Act
-        await repository.UpsertAsync(new[] { new IndexRate(IndexType.Ipca, new DateOnly(2025, 6, 1), 0.35m) });
-
-        // Assert
-        var stored = await Context.IndexRates.AsNoTracking().ToListAsync();
-        Assert.Equal(2, stored.Count);
-        Assert.Equal(0.05m, stored.Single(r => r.IndexType == IndexType.Cdi).Value);
-        Assert.Equal(0.35m, stored.Single(r => r.IndexType == IndexType.Ipca).Value);
-    }
-
-    [Fact]
-    public async Task Upsert_com_colecao_vazia_nao_altera_as_cotacoes()
-    {
-        // Arrange
-        var repository = new IndexRateRepository(Context);
-        await repository.UpsertAsync(CriarCotacoesCdi(0.05m));
+        var (contexto, comandos) = CriarContextoSemBanco();
+        using var _ = contexto;
+        var repository = new IndexRateRepository(contexto);
 
         // Act
         await repository.UpsertAsync(Array.Empty<IndexRate>());
 
         // Assert
-        Assert.Equal(1, await Context.IndexRates.CountAsync());
+        Assert.Empty(comandos.Executados);
     }
 
     [Fact]
@@ -95,7 +95,7 @@ public class IndexRateRepositoryTests : RepositoryTestBase
     {
         // Arrange
         var repository = new IndexRateRepository(Context);
-        await repository.UpsertAsync(new[]
+        await SemearAsync(new[]
         {
             new IndexRate(IndexType.Cdi, new DateOnly(2025, 6, 2), 0.05m),
             new IndexRate(IndexType.Cdi, new DateOnly(2025, 6, 13), 0.06m),
@@ -118,7 +118,7 @@ public class IndexRateRepositoryTests : RepositoryTestBase
     {
         // Arrange
         var repository = new IndexRateRepository(Context);
-        await repository.UpsertAsync(new[]
+        await SemearAsync(new[]
         {
             new IndexRate(IndexType.Cdi, new DateOnly(2025, 6, 1), 0.05m),
             new IndexRate(IndexType.Cdi, new DateOnly(2025, 6, 2), 0.05m),
@@ -143,7 +143,7 @@ public class IndexRateRepositoryTests : RepositoryTestBase
     {
         // Arrange
         var repository = new IndexRateRepository(Context);
-        await repository.UpsertAsync(new[]
+        await SemearAsync(new[]
         {
             new IndexRate(IndexType.Cdi, new DateOnly(2025, 6, 2), 0.05m),
             new IndexRate(IndexType.Ipca, new DateOnly(2025, 6, 1), 0.35m),
@@ -165,7 +165,7 @@ public class IndexRateRepositoryTests : RepositoryTestBase
     {
         // Arrange
         var repository = new IndexRateRepository(Context);
-        await repository.UpsertAsync(new[]
+        await SemearAsync(new[]
         {
             new IndexRate(IndexType.Cdi, new DateOnly(2025, 6, 4), 0.05m),
             new IndexRate(IndexType.Cdi, new DateOnly(2025, 6, 2), 0.05m),
@@ -202,7 +202,7 @@ public class IndexRateRepositoryTests : RepositoryTestBase
     {
         // Arrange
         var repository = new IndexRateRepository(Context);
-        await repository.UpsertAsync(new[]
+        await SemearAsync(new[]
         {
             new IndexRate(IndexType.Cdi, new DateOnly(2025, 6, 3), 0.05m),
             new IndexRate(IndexType.Cdi, new DateOnly(2025, 6, 30), 0.05m),
@@ -221,7 +221,7 @@ public class IndexRateRepositoryTests : RepositoryTestBase
     {
         // Arrange
         var repository = new IndexRateRepository(Context);
-        await repository.UpsertAsync(new[] { new IndexRate(IndexType.Ipca, new DateOnly(2025, 6, 1), 0.35m) });
+        await SemearAsync(new[] { new IndexRate(IndexType.Ipca, new DateOnly(2025, 6, 1), 0.35m) });
 
         // Act
         var result = await repository.GetLastReferenceDateAsync(IndexType.Cdi);
@@ -235,7 +235,7 @@ public class IndexRateRepositoryTests : RepositoryTestBase
     {
         // Arrange
         var repository = new IndexRateRepository(Context);
-        await repository.UpsertAsync(new[]
+        await SemearAsync(new[]
         {
             new IndexRate(IndexType.Ipca, new DateOnly(2025, 5, 1), 0.26m),
             new IndexRate(IndexType.Ipca, new DateOnly(2025, 6, 1), 0.24m),
@@ -256,7 +256,7 @@ public class IndexRateRepositoryTests : RepositoryTestBase
     {
         // Arrange
         var repository = new IndexRateRepository(Context);
-        await repository.UpsertAsync(new[] { new IndexRate(IndexType.Ipca, new DateOnly(2025, 7, 1), 0.26m) });
+        await SemearAsync(new[] { new IndexRate(IndexType.Ipca, new DateOnly(2025, 7, 1), 0.26m) });
 
         // Act
         var result = await repository.GetLastBeforeAsync(IndexType.Ipca, new DateOnly(2025, 7, 1));
@@ -270,13 +270,64 @@ public class IndexRateRepositoryTests : RepositoryTestBase
     {
         // Arrange
         var repository = new IndexRateRepository(Context);
-        await repository.UpsertAsync(new[] { new IndexRate(IndexType.Cdi, new DateOnly(2025, 6, 2), 0.05m) });
+        await SemearAsync(new[] { new IndexRate(IndexType.Cdi, new DateOnly(2025, 6, 2), 0.05m) });
 
         // Act
         var result = await repository.GetLastBeforeAsync(IndexType.Ipca, new DateOnly(2025, 7, 1));
 
         // Assert
         Assert.Null(result);
+    }
+
+    // Semeia direto no contexto InMemory, sem passar pelo upsert (que é SQL do PostgreSQL).
+    private async Task SemearAsync(IEnumerable<IndexRate> cotacoes)
+    {
+        Context.IndexRates.AddRange(cotacoes);
+        await Context.SaveChangesAsync();
+    }
+
+    private static (FixedIncomeDbContext Contexto, ComandosCapturados Comandos) CriarContextoSemBanco()
+    {
+        var comandos = new ComandosCapturados();
+        var options = new DbContextOptionsBuilder<FixedIncomeDbContext>()
+            .UseNpgsql("Host=sem-banco;Database=teste;Username=teste;Password=teste")
+            .AddInterceptors(comandos, new ConexaoSemBanco())
+            .Options;
+
+        return (new FixedIncomeDbContext(options), comandos);
+    }
+
+    private sealed record ComandoExecutado(string Texto, IReadOnlyDictionary<string, object?> Parametros);
+
+    // Registra o comando e, para escrita, impede a execução (não há banco).
+    private sealed class ComandosCapturados : DbCommandInterceptor
+    {
+        public List<ComandoExecutado> Executados { get; } = new();
+
+        public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            Executados.Add(new ComandoExecutado(
+                command.CommandText,
+                command.Parameters.Cast<DbParameter>().ToDictionary(p => p.ParameterName, p => (object?)p.Value)));
+
+            return ValueTask.FromResult(InterceptionResult<int>.SuppressWithResult(1));
+        }
+    }
+
+    private sealed class ConexaoSemBanco : DbConnectionInterceptor
+    {
+        public override ValueTask<InterceptionResult> ConnectionOpeningAsync(
+            DbConnection connection,
+            ConnectionEventData eventData,
+            InterceptionResult result,
+            CancellationToken cancellationToken = default)
+        {
+            return ValueTask.FromResult(InterceptionResult.Suppress());
+        }
     }
 
     private static IReadOnlyList<IndexRate> CriarCotacoesCdi(params decimal[] valores)
