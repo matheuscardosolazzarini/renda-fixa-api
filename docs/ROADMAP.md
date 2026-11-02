@@ -31,7 +31,7 @@ O comando para em dois pontos para você decidir: na aprovação da spec com os 
 ```mermaid
 flowchart TD
     F7["<b>F7 · Indexadores reais e dias úteis</b><br/>CDI e IPCA do BC, base 252, IPCA+ e IOF"]
-    F8["<b>F8 · CD automatizado e IaC</b><br/>Bicep, OIDC e deploy a cada merge na main"]
+    F8["<b>F8 · CD automatizado e IaC</b><br/>Terraform, OIDC e deploy a cada merge na main"]
     F9["<b>F9 · Qualidade</b><br/>Testcontainers, NetArchTest e Stryker.NET"]
     F10["<b>F10 · Observabilidade, cache, eventos</b><br/>Opcional: OpenTelemetry, Redis e outbox"]
     F7 -- "CDB 100% CDI bate com a Calculadora do Cidadão (± R$ 0,01)" --> F8
@@ -98,23 +98,28 @@ Achados da revisão do PR #2, nenhum bloqueante. Os dois primeiros entram na F8,
 
 ## F8 — CD automatizado e IaC
 
-Comece descrevendo em Bicep a infra que já existe (PostgreSQL Flexible Server, Container Apps e registry). O pipeline só é confiável se a infra puder ser recriada do zero. O build da imagem passa a rodar no runner do GitHub, o que também resolve o bloqueio de ACR Tasks da conta nova.
+Comece descrevendo em Terraform a infra que já existe (PostgreSQL Flexible Server, Container Apps e registry). O pipeline só é confiável se a infra puder ser recriada do zero. O build da imagem passa a rodar no runner do GitHub, o que também resolve o bloqueio de ACR Tasks da conta nova.
 
-Escolhi Bicep porque é nativo do Azure e não exige gerenciar state. Se o foco for vaga, Terraform aparece mais nos anúncios: a decisão é sua antes de começar (item 1 de "Decisões em aberto" da especificação).
+Decisão de 02/11/2026: Terraform em vez de Bicep, por ser o padrão mais pedido em vagas e não ficar preso ao Azure. O custo extra é o state remoto, guardado num Azure Storage Account.
 
 ### Passos
 
 1. Escrever `docs/SPEC-F8-EXECUCAO.md` com os ambientes, os gatilhos do pipeline e onde cada segredo fica guardado.
-2. Criar `infra/main.bicep` com módulos para Log Analytics, registry, Container Apps Environment, Container App e PostgreSQL, parametrizados por ambiente.
-3. Autenticar o GitHub no Azure via OIDC (federated credentials), sem senha ou client secret no repositório.
-4. Criar o workflow `deploy.yml` ao lado do `ci.yml`: em push na `main`, depois do CI verde, faz o build da imagem, o push pro registry com a tag do SHA do commit e o `az containerapp update`.
-5. Aplicar as migrations do EF Core com um migration bundle (`dotnet ef migrations bundle`) como etapa do pipeline, e não na inicialização da API.
-6. Criar o endpoint `/health`, que hoje não existe no código, e usá-lo num smoke test depois do deploy: se não responder 200, o pipeline falha.
-7. Guardar a connection string como secret do Container App (ou no Key Vault) e deixar mínimo de réplicas em zero para não gerar custo com a API parada.
+2. Criar o backend de state: um Storage Account com container para o `terraform.tfstate`, com lock nativo do blob. É o único recurso criado fora do Terraform, por um script curto documentado no README.
+3. Criar `infra/` com o provider `azurerm` e módulos para Log Analytics, registry, Container Apps Environment, Container App e PostgreSQL, parametrizados por ambiente (`*.tfvars`). Importar os recursos que já existem no Azure (`terraform import` ou blocos `import`) em vez de recriá-los.
+4. Autenticar o GitHub no Azure via OIDC (federated credentials), sem senha ou client secret no repositório. O mesmo login serve para o Terraform e para o deploy.
+5. Criar o workflow `infra.yml`: em PR que mexe em `infra/`, roda `terraform fmt -check`, `validate` e `plan`; o `apply` é manual (`workflow_dispatch`), para nenhuma mudança de infra entrar sem alguém ler o plano.
+6. Criar o workflow `deploy.yml` ao lado do `ci.yml`: em push na `main`, depois do CI verde, faz o build da imagem, o push pro registry com a tag do SHA do commit e o `az containerapp update`.
+7. Aplicar as migrations do EF Core com um migration bundle (`dotnet ef migrations bundle`) como etapa do pipeline, e não na inicialização da API.
+8. Criar o endpoint `/health`, que hoje não existe no código, e usá-lo num smoke test depois do deploy: se não responder 200, o pipeline falha.
+9. Guardar a connection string como secret do Container App (ou no Key Vault) e deixar mínimo de réplicas em zero para não gerar custo com a API parada. Nenhum segredo vai para o state em texto aberto quando houver alternativa (senha do PostgreSQL gerada e guardada como secret, nunca em `*.tfvars` commitado).
+10. Resolver as duas primeiras "Pendências herdadas da F7" (CDI descartado buscado de novo e JSON truncado sem retry) antes de existir qualquer alerta sobre o log do job.
 
 ### Critérios de conclusão
 
-- [ ] O Bicep recria toda a infra num resource group vazio com um único `az deployment group create`
+- [ ] O `terraform apply` recria toda a infra num resource group vazio, e um `terraform plan` logo depois não mostra nenhuma mudança
+- [ ] Os recursos que já existiam foram importados, e o primeiro `plan` contra eles não propõe destruir nada
+- [ ] Nenhum `*.tfstate` nem `*.tfvars` com segredo no repositório; o state fica só no Storage Account
 - [ ] Um merge na `main` publica a nova versão sem nenhum passo manual
 - [ ] A imagem leva a tag do SHA, e dá para saber qual commit está rodando
 - [ ] Nenhuma senha ou connection string aparece no repositório nem nos logs do Actions
@@ -171,4 +176,4 @@ Uma tarefa só está concluída quando passa nos sete pontos abaixo, além dos c
 
 ## Próximo passo
 
-Decidir entre Bicep e Terraform (item 1 de "Decisões em aberto" da especificação) e rodar `/executar-fase F8` no Claude Code.
+Rodar `/executar-fase F8` no Claude Code. Antes, deixar o Azure CLI instalado e logado (`az login`) na máquina, com permissão na assinatura e no Entra ID para criar o app registration do OIDC.

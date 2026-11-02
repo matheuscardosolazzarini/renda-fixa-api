@@ -253,7 +253,7 @@ São regras que independem de orquestração e precisam ser testáveis sem infra
 | Resiliência HTTP (v2) | Microsoft.Extensions.Http.Resilience |
 | Calendário (v2) | Feriados nacionais ANBIMA em tabela própria, carregados por seed |
 | Deploy contínuo (v2) | GitHub Actions com OIDC para Azure Container Apps |
-| Infraestrutura como código (v2) | Bicep (ver Decisões em aberto, item 1) |
+| Infraestrutura como código (v2) | Terraform com o provider `azurerm` e state remoto num Azure Storage Account |
 | Taxas fixas de indexador (v2) | Removidas: saem a seção `IndexRates` do `appsettings.json` e o `IndexRatesOptions`. Sem cotação, vale a RN-09 |
 | Testes de integração (v2) | Testcontainers com PostgreSQL 16 |
 | Regras de arquitetura (v2) | NetArchTest.Rules |
@@ -331,5 +331,5 @@ Na v2, além dos anteriores:
 Precisam ser fechadas antes da fase indicada. Ao decidir, registre a escolha na regra ou na
 tabela de decisões técnicas e remova o item desta lista.
 
-1. **Bicep ou Terraform (antes da F8).** Bicep é nativo do Azure e dispensa gerenciar state;
-   Terraform aparece mais em vagas.
+Nenhuma no momento. A última, Bicep ou Terraform, foi fechada em 02/11/2026: Terraform, por ser
+o padrão de infraestrutura como código mais pedido em vagas e não ficar preso ao Azure.

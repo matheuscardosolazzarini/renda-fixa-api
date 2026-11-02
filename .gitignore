@@ -486,3 +486,12 @@ $RECYCLE.BIN/
 # graphify: grafo local, reconstruído com `graphify update .`
 graphify-out/
 .claude/settings.json.graphify-bak
+
+# Terraform: state e variáveis com segredo nunca entram no repositório
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.example.tfvars
+crash.log
+.terraform.tfstate.lock.info
