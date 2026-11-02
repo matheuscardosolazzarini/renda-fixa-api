@@ -169,11 +169,39 @@ public class GetPortfolioSummaryUseCaseTests
             response.Data!.TotalNetAmount);
     }
 
+    // R-02: com data explícita, posição aportada depois dela fica fora do resumo em vez de derrubá-lo.
+    // Caso de referência: PreFixed 10%, R$ 1.000 desde 2025-04-01 até 2025-04-22 (13 dias úteis,
+    // 21 corridos): bruto 1.004,93, rendimento 4,93, IOF 1,48, IR 0,78, líquido 1.002,67.
     [Fact]
-    public async Task Data_explicita_anterior_ao_aporte_retorna_400()
+    public async Task Data_explicita_deixa_de_fora_a_posicao_aportada_depois_dela_e_fecha_a_rn_07()
     {
-        // Arrange: o aporte é de 2025-05-05 e a data informada, 2025-04-22. A regra de projetar na
-        // data do aporte vale só quando a data é omitida.
+        // Arrange
+        var asset = CriarAsset(AssetType.Cdb);
+        var before = new Position(asset, 1_000m, new DateOnly(2025, 4, 1));
+        var after = new Position(asset, 2_000m, new DateOnly(2025, 5, 5));
+        var useCase = CriarCaso(new[] { before, after }, new[] { asset });
+
+        // Act
+        var response = await useCase.ExecuteAsync(new DateOnly(2025, 4, 22));
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.Equal(1, response.Data!.PositionCount);
+        Assert.Equal(1_000m, response.Data!.TotalInvestedAmount);
+        Assert.Equal(1_004.93m, response.Data!.TotalGrossAmount);
+        Assert.Equal(4.93m, response.Data!.TotalGrossYield);
+        Assert.Equal(1.48m, response.Data!.TotalIofAmount);
+        Assert.Equal(0.78m, response.Data!.TotalTaxAmount);
+        Assert.Equal(1_002.67m, response.Data!.TotalNetAmount);
+        Assert.Equal(
+            response.Data!.TotalGrossAmount - response.Data!.TotalTaxAmount - response.Data!.TotalIofAmount,
+            response.Data!.TotalNetAmount);
+    }
+
+    [Fact]
+    public async Task Data_explicita_anterior_a_todos_os_aportes_retorna_200_com_totais_zerados()
+    {
+        // Arrange
         var asset = CriarAsset(AssetType.Cdb);
         var position = new Position(asset, 1_000m, new DateOnly(2025, 5, 5));
         var useCase = CriarCaso(new[] { position }, new[] { asset });
@@ -182,8 +210,109 @@ public class GetPortfolioSummaryUseCaseTests
         var response = await useCase.ExecuteAsync(new DateOnly(2025, 4, 22));
 
         // Assert
-        Assert.Equal(400, response.StatusCode);
-        Assert.Contains("anterior à data de aporte", response.Message);
+        Assert.Equal(200, response.StatusCode);
+        Assert.Equal(0, response.Data!.PositionCount);
+        Assert.Equal(0m, response.Data!.TotalInvestedAmount);
+        Assert.Equal(0m, response.Data!.TotalGrossAmount);
+        Assert.Equal(0m, response.Data!.TotalGrossYield);
+        Assert.Equal(0m, response.Data!.TotalIofAmount);
+        Assert.Equal(0m, response.Data!.TotalTaxAmount);
+        Assert.Equal(0m, response.Data!.TotalNetAmount);
+        Assert.Empty(response.Data!.ByAssetType);
+    }
+
+    [Fact]
+    public async Task Posicoes_fora_do_resumo_nao_entram_no_carregamento_do_mercado()
+    {
+        // Arrange: a data informada (2024-01-01) é anterior ao período coberto pelo calendário de
+        // teste (a partir de 2025-01-01). Se o mercado fosse carregado para a posição excluída,
+        // o calendário recusaria a data e o resumo viraria 400.
+        var asset = CriarAsset(AssetType.Cdb);
+        var position = new Position(asset, 1_000m, new DateOnly(2025, 5, 5));
+        var useCase = CriarCaso(new[] { position }, new[] { asset });
+
+        // Act
+        var response = await useCase.ExecuteAsync(new DateOnly(2024, 1, 1));
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.Equal(0, response.Data!.PositionCount);
+    }
+
+    [Fact]
+    public async Task Posicao_aportada_exatamente_na_data_de_referencia_entra_no_resumo_com_rendimento_zero()
+    {
+        // Arrange: a antiga rende como no caso de 21 dias; a nova (500) entra com rendimento zero.
+        var asset = CriarAsset(AssetType.Cdb);
+        var old = new Position(asset, 1_000m, new DateOnly(2025, 4, 1));
+        var sameDay = new Position(asset, 500m, new DateOnly(2025, 4, 22));
+        var useCase = CriarCaso(new[] { old, sameDay }, new[] { asset });
+
+        // Act
+        var response = await useCase.ExecuteAsync(new DateOnly(2025, 4, 22));
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.Equal(2, response.Data!.PositionCount);
+        Assert.Equal(1_500m, response.Data!.TotalInvestedAmount);
+        Assert.Equal(1_504.93m, response.Data!.TotalGrossAmount);
+        Assert.Equal(4.93m, response.Data!.TotalGrossYield);
+        Assert.Equal(1_502.67m, response.Data!.TotalNetAmount);
+    }
+
+    [Fact]
+    public async Task Verificacao_de_titulo_inexistente_vem_antes_da_exclusao_por_data()
+    {
+        // Arrange: a posição seria excluída pela data (aporte depois dela), mas o título dela não existe.
+        var asset = CriarAsset(AssetType.Cdb);
+        var orphan = new Position(asset, 1_000m, new DateOnly(2025, 5, 5));
+        var useCase = CriarCaso(new[] { orphan }, Array.Empty<FixedIncomeAsset>());
+
+        // Act
+        var response = await useCase.ExecuteAsync(new DateOnly(2025, 4, 22));
+
+        // Assert
+        Assert.Equal(404, response.StatusCode);
+    }
+
+    // R-01: caso do QA no resumo. CDB pré-fixado de 12%, R$ 1.000 em 2026-10-28, sem cotação de
+    // CDI, às 22h37 de 30/10 em Brasília: a data de hoje é 2026-10-30 (2 dias corridos).
+    [Fact]
+    public async Task Sem_data_e_sem_cotacao_de_cdi_entre_21h_e_meia_noite_em_brasilia_usa_a_data_de_brasilia()
+    {
+        // Arrange
+        var asset = CriarAsset(AssetType.Cdb, rate: 12m);
+        var position = new Position(asset, 1_000m, new DateOnly(2026, 10, 28));
+        var clock = new TimeProviderStub(new DateTimeOffset(2026, 10, 31, 1, 37, 0, TimeSpan.Zero));
+        var useCase = CriarCaso(new[] { position }, new[] { asset }, clock);
+
+        // Act
+        var response = await useCase.ExecuteAsync(referenceDate: null);
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.Equal(1_000.90m, response.Data!.TotalGrossAmount);
+        Assert.Equal(0.84m, response.Data!.TotalIofAmount);
+        Assert.Equal(0.01m, response.Data!.TotalTaxAmount);
+        Assert.Equal(1_000.05m, response.Data!.TotalNetAmount);
+    }
+
+    [Fact]
+    public async Task Data_de_hoje_no_resumo_muda_para_o_dia_seguinte_so_a_partir_de_03h_utc()
+    {
+        // Arrange: às 03h00 UTC é 00h00 de 31/10 em Brasília: 3 dias corridos, IOF de 90% (QA: bruto 1.001,35).
+        var asset = CriarAsset(AssetType.Cdb, rate: 12m);
+        var position = new Position(asset, 1_000m, new DateOnly(2026, 10, 28));
+        var clock = new TimeProviderStub(new DateTimeOffset(2026, 10, 31, 3, 0, 0, TimeSpan.Zero));
+        var useCase = CriarCaso(new[] { position }, new[] { asset }, clock);
+
+        // Act
+        var response = await useCase.ExecuteAsync(referenceDate: null);
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.Equal(1_001.35m, response.Data!.TotalGrossAmount);
+        Assert.Equal(1.22m, response.Data!.TotalIofAmount);
     }
 
     [Fact]
@@ -218,7 +347,10 @@ public class GetPortfolioSummaryUseCaseTests
 
         // Assert
         Assert.Equal(400, response.StatusCode);
-        Assert.Contains("cobertura do calendário", response.Message);
+        // B-05: cita a data enviada (e não a véspera) e o período coberto inteiro.
+        Assert.Equal(
+            "Data 2031-06-01 fora do período coberto pelo calendário (2025-01-01 a 2030-12-31).",
+            response.Message);
     }
 
     [Fact]
@@ -302,6 +434,11 @@ public class GetPortfolioSummaryUseCaseTests
         }
 
         public override DateTimeOffset GetUtcNow() => _now;
+
+        // Brasília fixo em UTC-3 (sem horário de verão desde 2019), para os testes não
+        // dependerem do fuso nem do tzdata da máquina.
+        public override TimeZoneInfo LocalTimeZone { get; } = TimeZoneInfo.CreateCustomTimeZone(
+            "America/Sao_Paulo", TimeSpan.FromHours(-3), "Brasília", "Brasília");
     }
 
     private sealed class HolidayRepositoryStub : IHolidayRepository

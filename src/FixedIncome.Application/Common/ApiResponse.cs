@@ -28,5 +28,8 @@ public class ApiResponse<T>
 
     public static ApiResponse<T> NotFound(string message) => new(404, false, message, default);
 
+    // Para erros que nascem no framework (405, 415...), fora dos casos de uso.
+    public static ApiResponse<T> Error(int statusCode, string message) => new(statusCode, false, message, default);
+
     public static ApiResponse<T> InternalError(string message) => new(500, false, message, default);
 }

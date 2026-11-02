@@ -1,3 +1,4 @@
+using System.Globalization;
 using FixedIncome.Domain.Common;
 using FixedIncome.Domain.Enums;
 using FixedIncome.Domain.ValueObjects;
@@ -6,6 +7,10 @@ namespace FixedIncome.Domain.Entities;
 
 public class Position : BaseEntity
 {
+    // Limites da coluna invested_amount, numeric(18,2): 16 dígitos inteiros e 2 casas decimais.
+    public const decimal InvestedAmountLimit = 10_000_000_000_000_000m;
+    public const int InvestedAmountDecimalPlaces = 2;
+
     private const decimal CdiScale = 10_000_000_000_000_000m; // 16 casas
 
     public Guid AssetId { get; private set; }
@@ -22,6 +27,18 @@ public class Position : BaseEntity
         if (investedAmount <= 0)
         {
             throw new DomainException("InvestedAmount deve ser maior que zero.");
+        }
+
+        if (investedAmount >= InvestedAmountLimit)
+        {
+            throw new DomainException(
+                $"InvestedAmount deve ser menor que {InvestedAmountLimit.ToString("0", CultureInfo.InvariantCulture)}.");
+        }
+
+        if (decimal.Round(investedAmount, InvestedAmountDecimalPlaces) != investedAmount)
+        {
+            throw new DomainException(
+                $"InvestedAmount deve ter no máximo {InvestedAmountDecimalPlaces} casas decimais.");
         }
 
         if (applicationDate < asset.IssueDate || applicationDate > asset.MaturityDate)

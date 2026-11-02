@@ -3,11 +3,22 @@ using FixedIncome.Domain.Entities;
 using FixedIncome.Domain.Enums;
 using FixedIncome.Infrastructure.Context;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
+using NpgsqlTypes;
 
 namespace FixedIncome.Infrastructure.Repositories;
 
 public class IndexRateRepository : IIndexRateRepository
 {
+    // Um INSERT ... ON CONFLICT por lote: a unicidade (index_type, reference_date) é resolvida no
+    // banco, de forma atômica. Ler antes e gravar depois deixava uma janela em que duas instâncias
+    // importando juntas violavam o índice único (23505). As colunas repetem as de
+    // IndexRateConfiguration; o id novo só vale para linhas inseridas, a linha existente mantém o seu.
+    private const string UpsertSql = @"
+        INSERT INTO index_rate (id, index_type, reference_date, value)
+        SELECT * FROM unnest(@ids, @index_types, @reference_dates, @values)
+        ON CONFLICT (index_type, reference_date) DO UPDATE SET value = EXCLUDED.value";
+
     private readonly FixedIncomeDbContext _context;
 
     public IndexRateRepository(FixedIncomeDbContext context)
@@ -43,39 +54,35 @@ public class IndexRateRepository : IIndexRateRepository
 
     public async Task UpsertAsync(IEnumerable<IndexRate> rates)
     {
-        var incoming = rates.ToList();
+        // O PostgreSQL rejeita (21000) um DO UPDATE que atinge a mesma linha duas vezes no mesmo comando.
+        var incoming = rates
+            .GroupBy(r => (r.IndexType, r.ReferenceDate))
+            .Select(g => g.Last())
+            .ToList();
+
         if (incoming.Count == 0)
         {
             return;
         }
 
-        var minDate = incoming.Min(r => r.ReferenceDate);
-        var maxDate = incoming.Max(r => r.ReferenceDate);
-        var indexTypes = incoming.Select(r => r.IndexType).Distinct().ToList();
-
-        // Carrega com rastreamento: o valor das linhas existentes é alterado no próprio contexto.
-        var existing = await _context.IndexRates
-            .Where(r => indexTypes.Contains(r.IndexType) && r.ReferenceDate >= minDate && r.ReferenceDate <= maxDate)
-            .ToListAsync();
-
-        var existingByKey = existing.ToDictionary(r => (r.IndexType, r.ReferenceDate));
-
-        foreach (var rate in incoming)
-        {
-            var key = (rate.IndexType, rate.ReferenceDate);
-
-            if (existingByKey.TryGetValue(key, out var current))
+        await _context.Database.ExecuteSqlRawAsync(
+            UpsertSql,
+            new NpgsqlParameter("ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid)
             {
-                // Value só tem setter privado na entidade, então a alteração passa pelo EF.
-                _context.Entry(current).Property(r => r.Value).CurrentValue = rate.Value;
-            }
-            else
+                Value = incoming.Select(r => r.Id).ToArray(),
+            },
+            new NpgsqlParameter("index_types", NpgsqlDbType.Array | NpgsqlDbType.Text)
             {
-                await _context.IndexRates.AddAsync(rate);
-                existingByKey[key] = rate;
-            }
-        }
-
-        await _context.SaveChangesAsync();
+                // A coluna guarda o enum como texto (HasConversion<string>).
+                Value = incoming.Select(r => r.IndexType.ToString()).ToArray(),
+            },
+            new NpgsqlParameter("reference_dates", NpgsqlDbType.Array | NpgsqlDbType.Date)
+            {
+                Value = incoming.Select(r => r.ReferenceDate).ToArray(),
+            },
+            new NpgsqlParameter("values", NpgsqlDbType.Array | NpgsqlDbType.Numeric)
+            {
+                Value = incoming.Select(r => r.Value).ToArray(),
+            });
     }
 }

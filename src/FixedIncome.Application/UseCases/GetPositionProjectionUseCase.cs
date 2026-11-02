@@ -51,7 +51,31 @@ public class GetPositionProjectionUseCase : IGetPositionProjectionUseCase
         {
             // DomainException do calendário (data fora da cobertura) e da cotação ausente (RN-09)
             // viram 400, como as demais violações de regra.
-            var date = referenceDate ?? await ResolveDefaultReferenceDateAsync();
+            DateOnly date;
+
+            if (referenceDate is not null)
+            {
+                date = referenceDate.Value;
+            }
+            else
+            {
+                var (defaultDate, fromCdi) = await ResolveDefaultReferenceDateAsync();
+                date = defaultDate;
+
+                // B-03: a data padrão não foi escolhida pelo usuário, então o erro precisa dizer
+                // qual foi e como ela saiu, para ele saber que pode informar referenceDate.
+                if (date < position.ApplicationDate)
+                {
+                    var origin = fromCdi
+                        ? "o dia útil seguinte à última cotação de CDI"
+                        : "a data de hoje em Brasília, pois não há cotação de CDI importada";
+
+                    return ApiResponse<PositionProjectionResponse>.BadRequest(
+                        $"A data de referência padrão ({date:yyyy-MM-dd}, {origin}) "
+                        + $"é anterior à data de aporte ({position.ApplicationDate:yyyy-MM-dd}). "
+                        + "Informe referenceDate.");
+                }
+            }
 
             var market = await _marketDataLoader.LoadAsync(position.ApplicationDate, date);
             var projection = position.Project(asset, date, market);
@@ -67,10 +91,14 @@ public class GetPositionProjectionUseCase : IGetPositionProjectionUseCase
     }
 
     // Mesma regra do resumo da carteira (achado I2): sem data, vale o dia útil seguinte à última
-    // cotação de CDI importada; sem nenhuma cotação, a data de hoje do TimeProvider.
-    private async Task<DateOnly> ResolveDefaultReferenceDateAsync()
+    // cotação de CDI importada; sem nenhuma cotação, a data de hoje em Brasília (R-01), nunca a
+    // data UTC, que entre 21h e 24h já é a do dia seguinte.
+    private async Task<(DateOnly Date, bool FromCdi)> ResolveDefaultReferenceDateAsync()
     {
-        return await _marketDataLoader.GetDefaultReferenceDateAsync()
-            ?? DateOnly.FromDateTime(_timeProvider.GetUtcNow().UtcDateTime);
+        var fromCdi = await _marketDataLoader.GetDefaultReferenceDateAsync();
+
+        return fromCdi is not null
+            ? (fromCdi.Value, true)
+            : (DateOnly.FromDateTime(_timeProvider.GetLocalNow().DateTime), false);
     }
 }

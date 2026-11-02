@@ -22,8 +22,9 @@ No Claude Code, rode `/executar-fase F7` (ou F8, F9, F10). O comando, em `.claud
 | `revisor-arquitetura` | confere camadas, pacotes, escopo, convenções do `CLAUDE.md` e qualidade dos testes |
 | `implementador` | implementa passo a passo, sempre com o teste antes do código |
 | `verificador-de-fase` | roda build, testes, cobertura e smoke test e registra cada critério com evidência em `docs/VALIDACAO-Fx.md` |
+| `qa-exploratorio` | usa a API rodando como caixa-preta, procura o que quebra fora da spec e registra os bugs em `docs/QA-Fx.md` |
 
-O comando para em dois pontos para você decidir: na aprovação da spec com os casos de referência e no fechamento da fase, antes do commit. Um critério só é marcado aqui quando o `VALIDACAO-Fx.md` traz a evidência.
+O comando para em dois pontos para você decidir: na aprovação da spec com os casos de referência e no fechamento da fase, antes do commit. Um critério só é marcado aqui quando o `VALIDACAO-Fx.md` traz a evidência. O QA também pode rodar sozinho, sobre uma fase já fechada, com `/qa-fase F7`.
 
 ## Visão geral
 
@@ -71,7 +72,7 @@ Comece pelo calendário de dias úteis. CDI acumulado, IPCA+ e IOF dependem de c
 
 ### Critérios de conclusão
 
-- [ ] `SPEC-F7-EXECUCAO.md` commitada antes do primeiro commit de código da fase
+- [x] `SPEC-F7-EXECUCAO.md` commitada antes do primeiro commit de código da fase (commit `9353869`, antes do código em `bd85c61`; CI #4 verde no PR #1)
 - [x] `CountBusinessDays` confere em três casos verificados à mão: um período com feriado nacional, a virada de ano e o Carnaval
 - [x] O job grava CDI e IPCA, e rodar duas vezes no mesmo dia não duplica registros
 - [x] Se a API do BC cair, a aplicação continua de pé: retry com backoff e erro registrado no log

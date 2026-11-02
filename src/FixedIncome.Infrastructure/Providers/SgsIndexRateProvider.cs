@@ -1,6 +1,6 @@
 using System.Globalization;
 using System.Net;
-using System.Net.Http.Json;
+using System.Text.Json;
 using FixedIncome.Application.Providers;
 using FixedIncome.Domain.Entities;
 using FixedIncome.Domain.Enums;
@@ -20,6 +20,8 @@ public class SgsIndexRateProvider : IIndexRateProvider
     private const int MaxWindowYears = 10;
 
     private const int MaxErrorBodyLength = 500;
+
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly HttpClient _httpClient;
     private readonly ILogger<SgsIndexRateProvider> _logger;
@@ -76,10 +78,7 @@ public class SgsIndexRateProvider : IIndexRateProvider
         // real e propaga com status e corpo, para não virar "sem cotações" em silêncio.
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
-            _logger.LogWarning(
-                "SGS série {Series} respondeu 404 para {From} a {To}; tratado como sem cotações.",
-                series, FormatForLog(queryFrom), FormatForLog(to));
-            return Array.Empty<IndexRate>();
+            return NoQuotes(series, 404, queryFrom, to);
         }
 
         if (!response.IsSuccessStatusCode)
@@ -96,7 +95,16 @@ public class SgsIndexRateProvider : IIndexRateProvider
                 response.StatusCode);
         }
 
-        var items = await response.Content.ReadFromJsonAsync<List<SgsItem>>() ?? new List<SgsItem>();
+        // Para o mesmo período sem dado, o SGS alterna entre 404 e 200, sempre com o corpo
+        // {"erro":{"statusCode":404,...}}. O 200 com esse corpo é a mesma ausência de cotação.
+        var content = await response.Content.ReadAsStringAsync();
+        if (IsNotFoundErrorBody(content))
+        {
+            return NoQuotes(series, 200, queryFrom, to);
+        }
+
+        var items = JsonSerializer.Deserialize<List<SgsItem>>(content, JsonOptions)
+                    ?? new List<SgsItem>();
 
         // Violação de invariante (CDI negativo, IPCA fora do dia 1) sobe como DomainException:
         // dado inválido da fonte não deve ser gravado nem silenciado.
@@ -110,6 +118,31 @@ public class SgsIndexRateProvider : IIndexRateProvider
                 item.Date,
                 decimal.Parse(item.Valor, NumberStyles.Float, CultureInfo.InvariantCulture)))
             .ToList();
+    }
+
+    private IEnumerable<IndexRate> NoQuotes(int series, int httpStatus, DateOnly from, DateOnly to)
+    {
+        _logger.LogWarning(
+            "SGS série {Series} respondeu {Status} sem dados para {From} a {To}; tratado como sem cotações.",
+            series, httpStatus, FormatForLog(from), FormatForLog(to));
+        return Array.Empty<IndexRate>();
+    }
+
+    private static bool IsNotFoundErrorBody(string content)
+    {
+        if (!content.AsSpan().TrimStart().StartsWith("{"))
+        {
+            return false;
+        }
+
+        using var document = JsonDocument.Parse(content);
+        // O texto começa com "{", então a raiz só pode ser um objeto.
+        return document.RootElement.TryGetProperty("erro", out var error)
+               && error.ValueKind == JsonValueKind.Object
+               && error.TryGetProperty("statusCode", out var status)
+               && status.ValueKind == JsonValueKind.Number
+               && status.TryGetInt32(out var code)
+               && code == 404;
     }
 
     private static string Format(DateOnly date) => date.ToString(DateFormat, CultureInfo.InvariantCulture);

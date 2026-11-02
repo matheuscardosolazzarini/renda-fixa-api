@@ -203,7 +203,10 @@ Na v2, quando `referenceDate` é omitida na projeção ou no consolidado, a data
 útil seguinte à última cotação de CDI importada, e não a data de hoje, para a consulta padrão
 não falhar por falta da cotação de ontem. No consolidado, uma posição com aporte posterior a
 essa data é projetada na própria data do aporte (rendimento zero, sem exigir cotação). Data
-informada explicitamente e sem cotação continua sendo erro (RN-09).
+informada explicitamente e sem cotação continua sendo erro (RN-09). No consolidado com data
+informada, as posições aportadas depois dela ficam fora do resumo. A data de "hoje" usada
+quando não há nenhuma cotação de CDI é a de Brasília (`America/Sao_Paulo`). O registro de aporte
+com data fora do período coberto pelo calendário (RN-08) é rejeitado com 400.
 
 A F1 previa um health check, mas ele não existe no código da v1. Entra na F8, onde o smoke
 test do deploy depende dele.

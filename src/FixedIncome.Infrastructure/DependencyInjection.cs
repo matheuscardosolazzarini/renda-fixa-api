@@ -23,9 +23,13 @@ public static class DependencyInjection
         services.AddScoped<IHolidayRepository, HolidayRepository>();
         services.AddScoped<IIndexRateRepository, IndexRateRepository>();
 
-        services.AddHttpClient<IIndexRateProvider, SgsIndexRateProvider>(client =>
-                client.BaseAddress = SgsIndexRateProvider.BaseAddress)
-            .AddStandardResilienceHandler();
+        var sgsClient = services.AddHttpClient<IIndexRateProvider, SgsIndexRateProvider>(client =>
+            client.BaseAddress = SgsIndexRateProvider.BaseAddress);
+
+        // A ordem importa: o primeiro handler registrado é o mais externo. A checagem do corpo vem
+        // depois da resiliência para o retry enxergar a falha que ela levanta.
+        sgsClient.AddStandardResilienceHandler();
+        sgsClient.AddHttpMessageHandler(() => new SgsNonJsonResponseHandler());
 
         return services;
     }

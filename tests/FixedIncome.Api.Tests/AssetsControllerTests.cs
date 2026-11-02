@@ -1,10 +1,15 @@
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace FixedIncome.Api.Tests;
 
 public class AssetsControllerTests : ApiTestBase
 {
+    // Inicializado antes do construtor da base, que chama ConfigureTestServices.
+    private readonly ErrorLogProviderStub _logs = new();
+
     private static object CriarRequestValido() => new
     {
         name = "CDB Banco X",
@@ -121,10 +126,84 @@ public class AssetsControllerTests : ApiTestBase
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    [Fact]
+    public async Task Remover_titulo_sem_aportes_responde_204_sem_corpo_e_sem_erro_no_log()
+    {
+        // Arrange
+        var assetId = await CriarTituloAsync();
+
+        // Act
+        var response = await Client.DeleteAsync($"/api/assets/{assetId}");
+        var body = await response.Content.ReadAsStringAsync();
+
+        // Assert
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(string.Empty, body);
+        Assert.Empty(_logs.Errors);
+        Assert.Equal(HttpStatusCode.NotFound, (await Client.GetAsync($"/api/assets/{assetId}")).StatusCode);
+    }
+
+    protected override void ConfigureTestServices(IServiceCollection services)
+    {
+        services.AddSingleton<ILoggerProvider>(_logs);
+    }
+
     private async Task<Guid> CriarTituloAsync()
     {
         var response = await Client.PostAsJsonAsync("/api/assets", CriarRequestValido());
         using var json = await ReadJsonAsync(response);
         return json.RootElement.GetProperty("data").GetProperty("id").GetGuid();
+    }
+
+    // Guarda as mensagens de nível Error ou acima, para provar que o caminho feliz não loga erro.
+    private sealed class ErrorLogProviderStub : ILoggerProvider
+    {
+        private readonly List<string> _errors = new();
+
+        public IReadOnlyList<string> Errors
+        {
+            get
+            {
+                lock (_errors)
+                {
+                    return _errors.ToList();
+                }
+            }
+        }
+
+        public ILogger CreateLogger(string categoryName) => new Logger(this);
+
+        public void Dispose()
+        {
+        }
+
+        private sealed class Logger : ILogger
+        {
+            private readonly ErrorLogProviderStub _owner;
+
+            public Logger(ErrorLogProviderStub owner)
+            {
+                _owner = owner;
+            }
+
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Error;
+
+            public void Log<TState>(
+                LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+                Func<TState, Exception?, string> formatter)
+            {
+                if (logLevel < LogLevel.Error)
+                {
+                    return;
+                }
+
+                lock (_owner._errors)
+                {
+                    _owner._errors.Add(formatter(state, exception));
+                }
+            }
+        }
     }
 }

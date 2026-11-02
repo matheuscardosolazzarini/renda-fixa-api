@@ -372,6 +372,90 @@ public class SgsIndexRateProviderTests
     }
 
     [Fact]
+    public async Task Resposta_200_com_corpo_de_erro_do_sgs_e_tratada_como_sem_cotacoes()
+    {
+        // Arrange
+        // O SGS alterna entre 404 e 200 para o mesmo período sem dado, sempre com este corpo.
+        var handler = new HttpMessageHandlerStub(
+            HttpStatusCode.OK,
+            """{"erro":{"statusCode":404,"detail":"br.gov.bcb.sgs.SGSNegocioException: Value(s) not found"}}""");
+        var provider = CreateProvider(handler);
+
+        // Act
+        var rates = await provider.FetchAsync(IndexType.Ipca, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 31));
+
+        // Assert
+        Assert.Empty(rates);
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task Resposta_200_com_corpo_de_erro_do_sgs_registra_o_mesmo_aviso_do_404()
+    {
+        // Arrange
+        var handler = new HttpMessageHandlerStub(
+            HttpStatusCode.OK, """{"erro":{"statusCode":404,"detail":"Value(s) not found"}}""");
+        var logger = new LoggerStub();
+        var client = new HttpClient(handler) { BaseAddress = SgsIndexRateProvider.BaseAddress };
+        var provider = new SgsIndexRateProvider(client, logger);
+
+        // Act
+        await provider.FetchAsync(IndexType.Cdi, new DateOnly(2026, 10, 24), new DateOnly(2026, 10, 25));
+
+        // Assert
+        var message = Assert.Single(logger.Messages);
+        Assert.Contains("tratado como sem cotações", message);
+    }
+
+    [Fact]
+    public async Task Resposta_200_com_corpo_de_erro_de_outro_status_continua_sendo_falha()
+    {
+        // Arrange
+        var handler = new HttpMessageHandlerStub(
+            HttpStatusCode.OK, """{"erro":{"statusCode":500,"detail":"falha interna"}}""");
+        var provider = CreateProvider(handler);
+
+        // Act
+        var act = () => provider.FetchAsync(IndexType.Cdi, new DateOnly(2026, 10, 24), new DateOnly(2026, 10, 25));
+
+        // Assert
+        await Assert.ThrowsAnyAsync<Exception>(act);
+    }
+
+    // Objetos JSON que só parecem o corpo de erro do SGS: nenhum deles é "sem cotações", e como
+    // também não são a lista esperada, a desserialização falha em vez de engolir o problema.
+    [Theory]
+    [InlineData("""{"dados":[]}""")]
+    [InlineData("""{"erro":"texto solto"}""")]
+    [InlineData("""{"erro":{"detail":"sem status"}}""")]
+    [InlineData("""{"erro":{"statusCode":"404"}}""")]
+    [InlineData("""{"erro":{"statusCode":99999999999}}""")]
+    public async Task Resposta_200_com_objeto_que_nao_e_o_corpo_de_erro_404_continua_sendo_falha(string corpo)
+    {
+        // Arrange
+        var provider = CreateProvider(new HttpMessageHandlerStub(HttpStatusCode.OK, corpo));
+
+        // Act
+        var act = () => provider.FetchAsync(IndexType.Cdi, new DateOnly(2026, 10, 24), new DateOnly(2026, 10, 25));
+
+        // Assert
+        await Assert.ThrowsAnyAsync<System.Text.Json.JsonException>(act);
+    }
+
+    [Fact]
+    public async Task Resposta_200_com_json_null_devolve_lista_vazia()
+    {
+        // Arrange
+        var provider = CreateProvider(new HttpMessageHandlerStub(HttpStatusCode.OK, "null"));
+
+        // Act
+        var rates = await provider.FetchAsync(IndexType.Cdi, new DateOnly(2026, 10, 24), new DateOnly(2026, 10, 25));
+
+        // Assert
+        Assert.Empty(rates);
+    }
+
+    [Fact]
     public async Task Periodo_de_um_dia_sem_cotacao_mas_com_a_da_vespera_na_resposta_devolve_lista_vazia()
     {
         // Arrange

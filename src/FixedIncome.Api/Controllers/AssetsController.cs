@@ -72,6 +72,13 @@ public class AssetsController : ControllerBase
     public async Task<IActionResult> Delete(Guid id)
     {
         var response = await _deleteAssetUseCase.ExecuteAsync(id);
+
+        // 204 não admite corpo: escrever o envelope lançaria InvalidOperationException.
+        if (response.StatusCode == StatusCodes.Status204NoContent)
+        {
+            return NoContent();
+        }
+
         return StatusCode(response.StatusCode, response);
     }
 }

@@ -73,7 +73,7 @@ public sealed class BusinessDayCalendar
         }
 
         // O fim é exclusivo: a última data efetivamente consultada é end - 1 dia.
-        EnsureCovered(end.AddDays(-1));
+        EnsureCovered(end.AddDays(-1), end);
 
         for (var day = start; day < end; day = day.AddDays(1))
         {
@@ -86,18 +86,32 @@ public sealed class BusinessDayCalendar
         return days;
     }
 
+    // Valida uma data de entrada contra o período coberto. A mensagem usa a descrição dada
+    // (ex.: "Data de aporte") para o usuário reconhecer o campo que enviou.
+    public void EnsureCovers(DateOnly date, string description = "Data")
+    {
+        if (date < CoverageStart || date > CoverageEnd)
+        {
+            throw new DomainException(
+                $"{description} {date:yyyy-MM-dd} fora do período coberto pelo calendário "
+                + $"({CoverageStart:yyyy-MM-dd} a {CoverageEnd:yyyy-MM-dd}).");
+        }
+    }
+
     private void EnsureCovered(DateOnly date)
     {
-        if (date < CoverageStart)
-        {
-            throw new DomainException(
-                $"Data {date:yyyy-MM-dd} anterior à cobertura do calendário, {CoverageStart:yyyy-MM-dd}.");
-        }
+        EnsureCovered(date, date);
+    }
 
-        if (date > CoverageEnd)
+    // informedDate é a data que o usuário enviou: no fim exclusivo, é o próprio fim, e não o
+    // último dia efetivamente consultado (fim - 1 dia).
+    private void EnsureCovered(DateOnly date, DateOnly informedDate)
+    {
+        if (date < CoverageStart || date > CoverageEnd)
         {
             throw new DomainException(
-                $"Data {date:yyyy-MM-dd} posterior à cobertura do calendário, {CoverageEnd:yyyy-MM-dd}.");
+                $"Data {informedDate:yyyy-MM-dd} fora do período coberto pelo calendário "
+                + $"({CoverageStart:yyyy-MM-dd} a {CoverageEnd:yyyy-MM-dd}).");
         }
     }
 }

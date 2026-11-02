@@ -251,3 +251,32 @@ sugerida ao Matheus.
   `dotnet build` com 0 avisos, conferida pelo orquestrador.
 - **C (mantido como dívida).** A configuração de retry usa os padrões do pacote, sem teste
   automatizado que trave 3 retries e backoff exponencial.
+
+## Upsert atômico das cotações (registro do orquestrador, 02/11/2026)
+
+O QA (PB-01, depois NB-01) levou o `IndexRateRepository.UpsertAsync` a gravar com `INSERT ... ON CONFLICT
+(index_type, reference_date) DO UPDATE SET value = EXCLUDED.value`, em um comando por lote. Detalhes, números e
+limites da evidência em `QA-F7.md`, seção "Correção do NB-01".
+
+- **Prova automatizada, parcial.** Os testes de repositório ainda usam InMemory, que não executa SQL. Os testes novos
+  verificam o comando e os parâmetros enviados (provedor Npgsql sem banco, com interceptadores); não verificam o efeito
+  no banco. Foram removidos 10 testes que exercitavam o código antigo (idempotência, atualização, inserção parcial e
+  independência de indexadores em InMemory; tratamento do 23505).
+- **Prova real, manual.** Semântica do SQL conferida no PostgreSQL (id preservado, valor atualizado, data nova inserida) e
+  corrida das duas instâncias em 12 tentativas (`race2.sh`): 0 ocorrências de 23505 e de `fail:` do EF Core, banco
+  1795/1795 em todas. O critério de "0 linhas `fail:`" no total não foi atingido por 3 linhas do SGS (2 timeouts do Polly e
+  1 resposta HTML), nenhuma do banco.
+- **Lacuna que sobra para a F9.** Cobrir idempotência, atualização do valor e a corrida com PostgreSQL real
+  (Testcontainers), onde estes comportamentos voltam a ter teste automatizado.
+- **Contagem de testes e cobertura** (método do CI, 02/11/2026): Domain 292, Application 105, Infrastructure 83, Api 51 =
+  **531**. Linha / branch: Domain 95,2% / 98,1%; Application 92,5% / 98,9%; Infrastructure 88,9% / 78,3%; Api 96,3% /
+  89,1%. O branch de Infrastructure caiu de 88,2% para 78,3%: `SgsIndexRateProvider` está com 8 de 14 branches (os ramos
+  do PB-02 não têm teste para todos os desvios) e `DependencyInjection` com 0 de 2. O README foi atualizado com estes números.
+
+### Atualização (02/11/2026, mesma rodada): NB-02 e cobertura
+
+Os números de cobertura do bloco anterior estão **superados**. Depois do NB-02 (corpo que não é JSON vira falha
+transitória, com o `SgsNonJsonResponseHandler` dentro do pipeline de resiliência) e dos testes dos desvios do
+`SgsIndexRateProvider`, do `DependencyInjection` e do `IndexRatesImportJob`, a medição pelo método do CI é: Domain 292
+testes, 95,2% / 98,1%; Application 105, 92,5% / 98,9%; Infrastructure 110, 95,6% / 98,1%; Api 51, 96,3% / 89,1%. Total
+**558 testes**. O README tem estes números. Detalhes e limites da evidência em `QA-F7.md`, seção "Correção do NB-02".

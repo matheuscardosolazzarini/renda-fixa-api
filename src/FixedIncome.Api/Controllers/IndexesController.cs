@@ -28,6 +28,16 @@ public class IndexesController : ControllerBase
         [FromQuery, Required] DateOnly? from,
         [FromQuery, Required] DateOnly? to)
     {
+        // O binder de enum aceita o número do valor (Enum.TryParse aceita dígitos), mas a API só
+        // documenta o nome: o número também é rejeitado no corpo das demais rotas.
+        var rawValue = Request.RouteValues["indexType"] as string;
+        if (!string.Equals(Enum.GetName(indexType), rawValue?.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            var invalid = ApiResponse<IEnumerable<IndexRateResponse>>.BadRequest(
+                "O valor do campo 'indexType' é inválido.");
+            return StatusCode(invalid.StatusCode, invalid);
+        }
+
         var response = await _getIndexRatesUseCase.ExecuteAsync(indexType, from!.Value, to!.Value);
         return StatusCode(response.StatusCode, response);
     }

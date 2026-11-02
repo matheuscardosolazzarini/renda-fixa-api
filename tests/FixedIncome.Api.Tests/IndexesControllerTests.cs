@@ -122,6 +122,26 @@ public class IndexesControllerTests : ApiTestBase
         Assert.Equal("O valor do campo 'indexType' é inválido.", json.RootElement.GetProperty("message").GetString());
     }
 
+    [Theory]
+    [InlineData("0")]
+    [InlineData("1")]
+    [InlineData("2")]
+    [InlineData("99")]
+    [InlineData("-1")]
+    public async Task Indexador_numerico_na_rota_retorna_400(string numero)
+    {
+        // Arrange
+        await SemearAsync(new IndexRate(IndexType.Cdi, new DateOnly(2026, 9, 14), 0.051660m));
+
+        // Act
+        var response = await Client.GetAsync($"/api/indexes/{numero}?from=2026-09-14&to=2026-09-14");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var json = await ReadJsonAsync(response);
+        Assert.Equal("O valor do campo 'indexType' é inválido.", json.RootElement.GetProperty("message").GetString());
+    }
+
     [Fact]
     public async Task Data_inicial_ausente_retorna_400_informando_o_campo_obrigatorio()
     {

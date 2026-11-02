@@ -25,6 +25,54 @@ Esta fase toca:
 - `src/FixedIncome.Api` — endpoint de cotações, registro do job, remoção das taxas fixas
 - Os projetos de teste correspondentes
 
+## Correções do QA (decididas pelo Matheus em 31/10/2026)
+
+O QA exploratório da fase (`docs/QA-F7.md`) achou os defeitos abaixo. As decisões valem como
+parte desta spec:
+
+- **B-01, limites das colunas.** `Rate` do título deve ser menor que 1e12 e `InvestedAmount` do
+  aporte menor que 1e16 (limites de `numeric(18,6)` e `numeric(18,2)`). Acima disso, o domínio
+  lança `DomainException` e a API responde 400, nunca 500. Vale no cadastro, na atualização do
+  título e no registro do aporte.
+- **B-07, casas decimais.** `Rate` com mais de 6 casas e `InvestedAmount` com mais de 2 são
+  rejeitados com 400, para a resposta nunca ecoar o que o banco não guarda.
+- **B-02, aporte fora do calendário.** O registro de aporte com `ApplicationDate` fora do período
+  coberto pelo calendário (2020-01-01 a 2030-12-31 com o seed atual) é rejeitado com 400, e a
+  mensagem informa o período coberto. Assim nenhum aporte aceito derruba depois o consolidado.
+- **B-05, mensagem do calendário.** A exceção de data fora da cobertura cita a data que o usuário
+  informou e o período coberto inteiro (início e fim).
+- **B-03, data padrão anterior ao aporte.** A projeção sem `referenceDate` cuja data padrão é
+  anterior ao aporte devolve 400 informando a data padrão usada, como ela foi escolhida e que o
+  usuário pode informar `referenceDate`.
+- **R-02, consolidado com data explícita.** Posições com `ApplicationDate` posterior à
+  `referenceDate` informada ficam fora do consolidado, em vez de derrubá-lo. Sem nenhuma posição
+  restante, o consolidado responde 200 zerado. Sem data informada, vale a regra da data padrão
+  (posição aportada depois dela rende zero). A projeção de uma posição com `referenceDate`
+  explícita anterior ao aporte continua 400.
+- **PB-01, importação concorrente.** Duas instâncias importando juntas podem colidir no índice
+  único (23505). O `UpsertAsync` grava com `INSERT ... ON CONFLICT (index_type, reference_date)
+  DO UPDATE SET value = EXCLUDED.value`, num único comando por lote, de modo que a colisão não
+  gera exceção nem log de erro do EF Core (revisão do Matheus após o reteste, 02/11/2026: a
+  primeira solução, reler e repetir ao capturar o 23505, deixava `fail:` no log). Cotação
+  repetida no mesmo lote vale pela última. Os testes de repositório com InMemory não executam
+  SQL: verificam o comando e os parâmetros enviados; o efeito no banco é verificado pelo
+  `race.sh` (ver `QA-F7.md`) e passa a ter teste automatizado com Testcontainers na F9.
+- **PB-02, corpo de erro com status 200.** O SGS responde ora 404, ora 200, com o mesmo corpo
+  `{"erro":{"statusCode":404,...}}` para período sem dado (reproduzido em 12 chamadas seguidas). O
+  provedor trata os dois como lista vazia.
+- **B-06, respostas de erro sem envelope.** 404, 405 e 415 do framework saem no formato
+  `ApiResponse`, como os demais erros.
+- **B-08, indexador numérico na rota.** `GET /api/indexes/{indexType}` aceita só o nome do
+  indexador (sem diferenciar maiúsculas); número devolve 400.
+- **B-09, DELETE.** `DELETE /api/assets/{id}` bem-sucedido responde 204 sem corpo.
+- **B-04, README.** O caminho com Docker passa a mostrar um comando de migration que funciona
+  (a imagem não tem o SDK) e a reiniciar a API depois da migration.
+- **NB-02, corpo que não é JSON.** O SGS pode responder 200 com HTML no lugar do JSON. Resposta de
+  sucesso cujo corpo não começa com `{` ou `[` é falha transitória: o `SgsNonJsonResponseHandler`,
+  registrado dentro do pipeline de resiliência, lança `HttpRequestException` e o retry do Polly tenta
+  de novo (3 repetições, como as demais falhas de transporte). Esgotadas as tentativas, a falha
+  propaga e a importação a registra. JSON malformado que começa com `{` ou `[` não é repetido.
+
 ## Fora de escopo
 
 - Health check e qualquer item de deploy (F8)
@@ -93,8 +141,10 @@ não a data de hoje: assim a consulta padrão nunca falha por falta da cotação
 data é obtida por `TimeProvider` injetado, não por `DateTime.UtcNow`, para os testes não
 dependerem do relógio. Data informada explicitamente e sem cotação continua devolvendo 400
 com a primeira data faltante. Sem nenhuma cotação de CDI importada, usa-se a data de hoje
-pelo `TimeProvider`, em UTC (simplificação: entre 21h e 24h em Brasília a data de hoje já é a
-do dia seguinte). Extensão decidida pelo Matheus na revisão da fase: a projeção ganha a
+pelo `TimeProvider`, no fuso de Brasília (`America/Sao_Paulo`): a data de "hoje" nunca é a
+data UTC, que entre 21h e 24h em Brasília já é a do dia seguinte (decisão do Matheus no QA,
+31/10/2026, no lugar da simplificação em UTC; vale também para o "até hoje" da importação).
+Extensão decidida pelo Matheus na revisão da fase: a projeção ganha a
 mesma regra do resumo, e, no resumo sem data, a posição com aporte posterior à data padrão é
 projetada na data do aporte (rendimento zero, sem exigir cotação).
 

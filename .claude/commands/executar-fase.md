@@ -17,6 +17,7 @@ confere o que voltou e decide se a fase avança. Siga as etapas na ordem. Uma et
 | `revisor-arquitetura` | Opus | camadas, convenções, escopo, qualidade dos testes | toda fase, depois da implementação; em F8 e F9, também na spec |
 | `implementador` | Sonnet (Haiku em passo mecânico) | testes primeiro, depois código, um passo por vez | cada passo e cada correção |
 | `verificador-de-fase` | Sonnet | build, testes, cobertura, smoke, critério a critério | fim da fase |
+| `qa-exploratorio` | Opus no roteiro, Sonnet na execução | uso da API como caixa-preta, bugs fora da spec | depois da verificação |
 
 Raciocínio e revisão ficam com o Opus; execução fica com Sonnet ou Haiku. Passo mecânico é
 aquele sem regra de negócio: DTO, registro em DI, configuração de EF Core, migration,
@@ -84,6 +85,13 @@ duas rodadas de correção; se ainda houver bloqueante, PARE e reporte.
 `verificador-de-fase`, informando a contagem de testes da linha de base. Se o veredito for
 `REPROVADA`, volte à etapa 5 (uma rodada) e verifique de novo. Reprovada outra vez: PARE e
 reporte.
+
+## Etapa 6b — QA exploratório
+
+Siga `.claude/commands/qa-fase.md` para esta fase, até a etapa 4 dele (triagem). Bugs de
+severidade alta ou média voltam para a etapa 5 deste comando como uma rodada de correção, com o
+teste automatizado antes da correção, e o roteiro afetado é executado de novo. Bugs de severidade
+baixa ficam registrados no `QA-$ARGUMENTS.md` e entram no relatório de fechamento.
 
 ## Etapa 7 — Revisão de fase
 
