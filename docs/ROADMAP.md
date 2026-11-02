@@ -82,6 +82,20 @@ Comece pelo calendário de dias úteis. CDI acumulado, IPCA+ e IOF dependem de c
 - [x] Cada RN nova tem testes (skill `testes-xunit`), com o cliente HTTP testado por um `HttpMessageHandler` stub `private sealed`, sem biblioteca de mock
 - [x] README explica as regras novas e traz um exemplo de chamada
 
+Status: **concluída** em 02/11/2026 (PRs #1 e #2). Spec, revisão, validação e QA em `docs/SPEC-F7-EXECUCAO.md`, `docs/REVISAO-ESPECIALISTA-F7.md`, `docs/VALIDACAO-F7.md` e `docs/QA-F7.md`.
+
+### Pendências herdadas da F7
+
+Achados da revisão do PR #2, nenhum bloqueante. Os dois primeiros entram na F8, que já mexe em retry, logs e alertas.
+
+- [ ] **CDI descartado buscado de novo para sempre.** Cotação de CDI em dia não útil é descartada, mas a última data importada não avança: toda execução busca a mesma data e registra o mesmo aviso. Tratar antes de criar alertas sobre o log do job.
+- [ ] **JSON truncado sem retry.** O `SgsNonJsonResponseHandler` só trata como falha transitória o corpo que não começa com `{` ou `[`; um JSON truncado que começa com `{` falha sem nova tentativa.
+- [ ] **R-01 ao vivo.** Repetir entre 21h e 24h de Brasília o cenário do `QA-F7.md` (tabela de cotações vazia, projeção sem data) para confirmar fora do teste de unidade que "hoje" é a data de Brasília.
+
+## Manutenção
+
+- [ ] **Calendário ANBIMA só até 2030.** A partir de 2031 a importação de CDI falha (data fora da cobertura) e projeções com data posterior devolvem 400. Estender o seed com os feriados publicados pela ANBIMA (planilha até 2078) antes do fim de 2030, de preferência já até 2050.
+
 ## F8 — CD automatizado e IaC
 
 Comece descrevendo em Bicep a infra que já existe (PostgreSQL Flexible Server, Container Apps e registry). O pipeline só é confiável se a infra puder ser recriada do zero. O build da imagem passa a rodar no runner do GitHub, o que também resolve o bloqueio de ACR Tasks da conta nova.
@@ -155,6 +169,6 @@ Uma tarefa só está concluída quando passa nos sete pontos abaixo, além dos c
 6. Existe um PR descrevendo o que mudou e por quê, mesmo trabalhando sozinho.
 7. A partir da F8, a mudança está no ar no Azure e funcionando.
 
-## Primeiro passo
+## Próximo passo
 
-Commitar a base da v2. Depois disso, rodar `/executar-fase F7` no Claude Code.
+Decidir entre Bicep e Terraform (item 1 de "Decisões em aberto" da especificação) e rodar `/executar-fase F8` no Claude Code.
