@@ -88,8 +88,8 @@ Status: **concluída** em 02/11/2026 (PRs #1 e #2). Spec, revisão, validação 
 
 Achados da revisão do PR #2, nenhum bloqueante. Os dois primeiros entram na F8, que já mexe em retry, logs e alertas.
 
-- [ ] **CDI descartado buscado de novo para sempre.** Cotação de CDI em dia não útil é descartada, mas a última data importada não avança: toda execução busca a mesma data e registra o mesmo aviso. Tratar antes de criar alertas sobre o log do job.
-- [ ] **JSON truncado sem retry.** O `SgsNonJsonResponseHandler` só trata como falha transitória o corpo que não começa com `{` ou `[`; um JSON truncado que começa com `{` falha sem nova tentativa.
+- [x] **CDI descartado buscado de novo para sempre.** Cotação de CDI em dia não útil é descartada, mas a última data importada não avança: toda execução busca a mesma data e registra o mesmo aviso. Tratar antes de criar alertas sobre o log do job. Resolvida na F8: a busca parte do próximo dia útil após a última cotação (`VALIDACAO-F8.md`).
+- [x] **JSON truncado sem retry.** O `SgsNonJsonResponseHandler` só trata como falha transitória o corpo que não começa com `{` ou `[`; um JSON truncado que começa com `{` falha sem nova tentativa. Resolvida na F8: o corpo precisa ser JSON bem formado por inteiro (`VALIDACAO-F8.md`).
 - [ ] **R-01 ao vivo.** Repetir entre 21h e 24h de Brasília o cenário do `QA-F7.md` (tabela de cotações vazia, projeção sem data) para confirmar fora do teste de unidade que "hoje" é a data de Brasília.
 
 ## Manutenção
@@ -112,12 +112,34 @@ Decisão de 08/11/2026: a publicação em nuvem ficou adiada (ver "Adiado: publi
 
 ### Critérios de conclusão
 
-- [ ] As duas pendências herdadas da F7 resolvidas, cada uma com teste escrito antes da correção
-- [ ] `GET /health` responde 200, com teste
+- [x] As duas pendências herdadas da F7 resolvidas, cada uma com teste escrito antes da correção
+- [x] `GET /health` responde 200, com teste
 - [ ] Um merge na `main` publica no GHCR uma imagem com a tag do SHA, sem nenhum passo manual
 - [ ] O smoke test aplica o bundle num PostgreSQL limpo e a imagem responde 200 em `/health` e `/api/assets`; um smoke que falha marca a execução como falha e não move a tag `latest`
 - [ ] Nenhum segredo novo no repositório nem nos logs do Actions (só o `GITHUB_TOKEN`)
-- [ ] README com o badge, as instruções para rodar a imagem e o motivo do adiamento da nuvem
+- [x] README com o badge, as instruções para rodar a imagem e o motivo do adiamento da nuvem
+
+Status: **implementada e verificada localmente** em 09/11/2026 (591 testes; `docs/SPEC-F8-EXECUCAO.md`, `docs/VALIDACAO-F8.md`, `docs/QA-F8.md`). Os três critérios do pipeline ficam abertos até a primeira execução real do `release.yml` no GitHub: o merge publicar a tag do SHA no GHCR, o smoke do runner aprovar e mover `latest` (e reprovar sem movê-la), e a ausência de segredo nos logs do Actions. Falta, para marcá-los, o link da execução e a tag do SHA visível no GHCR. Depois do primeiro push, o pacote nasce privado e só o Matheus o torna público nas configurações do pacote.
+
+### Riscos do QA da F8
+
+O QA exploratório (`docs/QA-F8.md`) deixou 17 riscos e 3 bugs de documentação. Decisão de 09/11/2026 (emenda pós-QA da `docs/SPEC-F8-EXECUCAO.md`): nenhum fica pendente. Cada um foi corrigido ou aceito com o motivo abaixo.
+
+**Aceitos:**
+
+| Risco | Motivo |
+|---|---|
+| R-08: banco fora do ar responde 500 em vez de 503 | Tratado no `/health/ready` da F10, que passa a checar o PostgreSQL. |
+| R-09: banco congelado leva até 45 s para a primeira requisição falhar | Tratado no `/health/ready` da F10. O `/health` atual não consulta o banco e não é afetado. |
+| R-11: o bundle cria o banco quando o nome na connection string está errado | Comportamento do EF, que cria o banco ao aplicar as migrations. Documentado no README, com o aviso de conferir o nome do banco antes de rodar o bundle. |
+| R-16: o provedor recua um dia quando `from == to` | Efeito nulo: a janela recuada cai num dia sem dados. O contorno é mantido porque o 400 do SGS para `dataInicial == dataFinal` pode voltar; o comentário do provedor foi atualizado com o que o QA observou. |
+| CI rodando duas vezes por merge | Decisão da spec: mantém o badge do `ci.yml` válido e o `workflow_call`. O repositório é gratuito para Actions. |
+| R-15: as tags de candidatas se acumulam no GHCR | A limpeza fica para quando o volume de imagens importar. |
+| Digest do `postgres` do smoke não é atualizado pelo Dependabot | O Dependabot não atualiza imagem de `services:` de workflow; o `docker` em `/` cobre só o Dockerfile. A troca do digest é manual e está dita em comentário no `release.yml` e no `dependabot.yml`. |
+
+**Corrigidos na emenda:** R-01 a R-07, R-10, R-12 a R-15, R-17 e B-01 a B-03. O R-15 do smoke com o arquivo do workspace também foi corrigido, e não aceito: o bundle passou a um job próprio (`contents: read`) e o smoke aplica o artefato baixado. As correções e a evidência estão em `docs/VALIDACAO-F8.md`, na seção de correções pós-QA.
+
+Não há item pendente do QA da F8. Os três critérios de pipeline acima continuam abertos, pelo motivo já descrito no status.
 
 ## Adiado: publicação em nuvem com Terraform
 

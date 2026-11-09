@@ -5,3 +5,5 @@
 .vscode
 **/TestResults
 **/*.user
+artifacts/
+efbundle

@@ -11,6 +11,7 @@ namespace FixedIncome.Infrastructure.Tests.Providers;
 public class SgsNonJsonResponseHandlerTests
 {
     private const string Html = "<html><body>Bad gateway</body></html>";
+    private const string JsonTruncado = """[{"data":"26/10/2026","valor":""";
     private const string Json = """[{"data":"26/10/2026","valor":"0.050788"}]""";
 
     [Fact]
@@ -50,10 +51,28 @@ public class SgsNonJsonResponseHandlerTests
     }
 
     [Fact]
-    public async Task Json_malformado_nao_e_repetido_porque_nao_e_corpo_de_outro_formato()
+    public async Task Resposta_com_json_truncado_do_sgs_e_tratada_como_falha_transitoria()
     {
         // Arrange
-        var primario = new RespostasEmSequenciaHandler((HttpStatusCode.OK, """[{"data":"26/10/2026","valor":"""));
+        // A primeira tentativa recebe o JSON cortado no meio; a segunda, a cotação.
+        var primario = new RespostasEmSequenciaHandler((HttpStatusCode.OK, JsonTruncado), (HttpStatusCode.OK, Json));
+        using var services = CriarServicosComPipelineReal(primario);
+        var provider = services.GetRequiredService<IIndexRateProvider>();
+
+        // Act
+        var rates = (await provider.FetchAsync(IndexType.Cdi, new DateOnly(2026, 10, 26), new DateOnly(2026, 10, 27))).ToList();
+
+        // Assert
+        var rate = Assert.Single(rates);
+        Assert.Equal(new DateOnly(2026, 10, 26), rate.ReferenceDate);
+        Assert.Equal(2, primario.Requisicoes);
+    }
+
+    [Fact]
+    public async Task Json_truncado_em_todas_as_tentativas_propaga_a_falha_depois_de_esgotar_o_retry()
+    {
+        // Arrange
+        var primario = new RespostasEmSequenciaHandler((HttpStatusCode.OK, JsonTruncado));
         using var services = CriarServicosComPipelineReal(primario);
         var provider = services.GetRequiredService<IIndexRateProvider>();
 
@@ -61,8 +80,10 @@ public class SgsNonJsonResponseHandlerTests
         var act = () => provider.FetchAsync(IndexType.Cdi, new DateOnly(2026, 10, 26), new DateOnly(2026, 10, 27));
 
         // Assert
-        await Assert.ThrowsAnyAsync<System.Text.Json.JsonException>(act);
-        Assert.Equal(1, primario.Requisicoes);
+        // 1 tentativa inicial + 3 repetições do retry padrão.
+        var exception = await Assert.ThrowsAsync<HttpRequestException>(act);
+        Assert.Contains("não é JSON", exception.Message);
+        Assert.Equal(4, primario.Requisicoes);
     }
 
     [Theory]
@@ -87,6 +108,10 @@ public class SgsNonJsonResponseHandlerTests
     [InlineData("   ")]
     [InlineData("Service Unavailable")]
     [InlineData("<!DOCTYPE html><html></html>")]
+    [InlineData("""[{"data":"26/10/2026","valor":""")]
+    [InlineData("{")]
+    [InlineData("[1,2")]
+    [InlineData("""{"a":1}}""")]
     public async Task Corpo_que_nao_e_json_com_status_de_sucesso_lanca_http_request_exception(string corpo)
     {
         // Arrange

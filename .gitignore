@@ -495,3 +495,6 @@ graphify-out/
 !*.example.tfvars
 crash.log
 .terraform.tfstate.lock.info
+
+# Migration bundle gerado na raiz (README, --output efbundle)
+efbundle

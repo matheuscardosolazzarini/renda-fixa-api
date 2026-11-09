@@ -194,7 +194,7 @@ valores já arredondados.
 | GET | `/api/positions/{id}/projection?referenceDate=` | Projeção da posição |
 | GET | `/api/portfolio/summary?referenceDate=` | Consolidado da carteira |
 | GET | `/api/indexes/{indexType}?from=&to=` | Cotações de um indexador no período (v2) |
-| GET | `/health` | Health check (v2, F8) |
+| GET | `/health` | Liveness, texto `Healthy`, fora do envelope `ApiResponse<T>` (v2, F8) |
 
 A projeção retorna valor investido, valor bruto, rendimento, alíquota aplicada, imposto
 devido e valor líquido. Na v2, retorna também alíquota e valor de IOF, e indica se a projeção
@@ -209,8 +209,9 @@ informada, as posições aportadas depois dela ficam fora do resumo. A data de "
 quando não há nenhuma cotação de CDI é a de Brasília (`America/Sao_Paulo`). O registro de aporte
 com data fora do período coberto pelo calendário (RN-08) é rejeitado com 400.
 
-A F1 previa um health check, mas ele não existe no código da v1. Entra na F8, onde o smoke
-test da imagem publicada depende dele.
+A F1 previa um health check; ele só foi entregue na F8, onde o smoke test da imagem publicada
+passou a depender dele. `GET /health` é um check de liveness: responde 200 com o texto `Healthy`
+enquanto o processo está de pé, não consulta o banco e só aceita GET e HEAD.
 
 ## Arquitetura
 
@@ -264,14 +265,22 @@ São regras que independem de orquestração e precisam ser testáveis sem infra
 Padrões mantidos do projeto: controller herda `ControllerBase` e retorna
 `StatusCode(response.StatusCode, response)`; respostas encapsuladas em `ApiResponse<T>`;
 configuração de entidade via `IEntityTypeConfiguration` com `HasColumnName` em SNAKE_CASE;
-repositórios assíncronos retornando `Task<IEnumerable<T>>`.
+repositórios assíncronos retornando `Task<IEnumerable<T>>`. O `GET /health` é a exceção à regra
+do envelope: responde o texto puro `Healthy`, porque é um check de liveness, não um recurso de
+negócio.
+
+**Importação das cotações** (v2). Duas regras da importação. A busca incremental do CDI parte do
+próximo dia útil após a última cotação gravada, e não do dia seguinte: cotação em dia não útil é
+descartada e não avança a última data, então partir de "última + 1" pediria a mesma data a cada
+execução. A resposta do SGS só é aceita se for JSON bem formado por inteiro; HTML ou JSON cortado
+é falha transitória e entra no retry, em vez de falhar sem nova tentativa.
 
 Comentários em português, identificadores em inglês.
 
 ## Fases
 
 **F1 — Fundação.** Solution com os quatro projetos, referências entre camadas, Docker
-Compose com PostgreSQL, health check respondendo.
+Compose com PostgreSQL (o health check previsto aqui só foi entregue na F8).
 
 **F2 — Domínio.** Entidades, enums, validações de invariante, cálculo de rentabilidade e
 apuração de IR. Testes de domínio cobrindo RN-01 a RN-05, incluindo as quatro faixas da

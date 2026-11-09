@@ -333,6 +333,43 @@ public class GetPortfolioSummaryUseCaseTests
     }
 
     [Fact]
+    public async Task Cotacao_de_cdi_ausente_identifica_a_posicao_e_lembra_da_importacao()
+    {
+        // Arrange: mesma situação do teste anterior; só há CDI de 01/04, falta 02/04.
+        var asset = CriarAsset(AssetType.Cdb, IndexType.Cdi, rate: 100m);
+        var position = new Position(asset, 1_000m, new DateOnly(2025, 4, 1));
+        var useCase = CriarCaso(
+            new[] { position }, new[] { asset }, new IndexRate(IndexType.Cdi, new DateOnly(2025, 4, 1), 0.05m));
+
+        // Act
+        var response = await useCase.ExecuteAsync(new DateOnly(2025, 4, 4));
+
+        // Assert
+        Assert.Equal(400, response.StatusCode);
+        Assert.Equal(
+            $"Posição {position.Id} (título 'Título Teste'): Cotação de CDI ausente para 2025-04-02. "
+            + "A importação de cotações pode estar desligada (IndexRatesImport:Enabled) ou ainda não ter rodado.",
+            response.Message);
+    }
+
+    [Fact]
+    public async Task Erro_de_dominio_sem_relacao_com_cotacao_mantem_a_mensagem_original()
+    {
+        // Arrange: data explícita fora da cobertura do calendário não é falta de cotação.
+        var asset = new FixedIncomeAsset(
+            "Título Teste", "Emissor Teste", AssetType.Cdb, IndexType.PreFixed, 10m,
+            new DateOnly(2025, 1, 1), new DateOnly(2035, 1, 1));
+        var position = new Position(asset, 1_000m, asset.IssueDate);
+        var useCase = CriarCaso(new[] { position }, new[] { asset });
+
+        // Act
+        var response = await useCase.ExecuteAsync(new DateOnly(2031, 6, 1));
+
+        // Assert
+        Assert.DoesNotContain("importação", response.Message);
+    }
+
+    [Fact]
     public async Task Data_de_referencia_fora_da_cobertura_do_calendario_retorna_400()
     {
         // Arrange

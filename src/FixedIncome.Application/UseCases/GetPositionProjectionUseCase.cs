@@ -84,6 +84,12 @@ public class GetPositionProjectionUseCase : IGetPositionProjectionUseCase
 
             return ApiResponse<PositionProjectionResponse>.Ok(response);
         }
+        // R-10: a causa mais comum de CDI ausente é a importação desligada ou ainda não executada.
+        catch (DomainException ex) when (ex.Message.StartsWith("Cotação de CDI ausente", StringComparison.Ordinal))
+        {
+            return ApiResponse<PositionProjectionResponse>.BadRequest(
+                $"{ex.Message} A importação de cotações pode estar desligada (IndexRatesImport:Enabled) ou ainda não ter rodado.");
+        }
         catch (DomainException ex)
         {
             return ApiResponse<PositionProjectionResponse>.BadRequest(ex.Message);

@@ -172,6 +172,27 @@ public class GetPositionProjectionUseCaseTests
     }
 
     [Fact]
+    public async Task Cotacao_de_cdi_ausente_lembra_que_a_importacao_pode_estar_desligada()
+    {
+        // Arrange: aporte numa terça (2025-04-01); só há CDI de 01/04, falta 02/04.
+        var asset = new FixedIncomeAsset(
+            "CDB Banco X", "Banco X", AssetType.Cdb, IndexType.Cdi, 100m,
+            new DateOnly(2025, 1, 1), new DateOnly(2027, 1, 1));
+        var position = new Position(asset, 1_000m, new DateOnly(2025, 4, 1));
+        var useCase = CriarCaso(position, asset, new IndexRate(IndexType.Cdi, new DateOnly(2025, 4, 1), 0.05m));
+
+        // Act
+        var response = await useCase.ExecuteAsync(position.Id, new DateOnly(2025, 4, 4));
+
+        // Assert
+        Assert.Equal(400, response.StatusCode);
+        Assert.Equal(
+            "Cotação de CDI ausente para 2025-04-02. "
+            + "A importação de cotações pode estar desligada (IndexRatesImport:Enabled) ou ainda não ter rodado.",
+            response.Message);
+    }
+
+    [Fact]
     public async Task Data_de_referencia_ausente_usa_o_dia_util_seguinte_a_ultima_cotacao_de_cdi()
     {
         // Arrange: a última cotação de CDI é quinta, 2025-04-17; 18/04 (Paixão), 19 e 20/04 (fim de
