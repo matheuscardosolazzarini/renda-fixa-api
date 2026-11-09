@@ -114,12 +114,12 @@ Decisão de 08/11/2026: a publicação em nuvem ficou adiada (ver "Adiado: publi
 
 - [x] As duas pendências herdadas da F7 resolvidas, cada uma com teste escrito antes da correção
 - [x] `GET /health` responde 200, com teste
-- [ ] Um merge na `main` publica no GHCR uma imagem com a tag do SHA, sem nenhum passo manual
-- [ ] O smoke test aplica o bundle num PostgreSQL limpo e a imagem responde 200 em `/health` e `/api/assets`; um smoke que falha marca a execução como falha e não move a tag `latest`
-- [ ] Nenhum segredo novo no repositório nem nos logs do Actions (só o `GITHUB_TOKEN`)
+- [x] Um merge na `main` publica no GHCR uma imagem com a tag do SHA, sem nenhum passo manual (execução [42567411650](https://github.com/matheuscardosolazzarini/renda-fixa-api/actions/runs/42567411650), merge `081c5d5`)
+- [x] O smoke test aplica o bundle num PostgreSQL limpo e a imagem responde 200 em `/health` e `/api/assets`; um smoke que falha marca a execução como falha e não move a tag `latest` (smoke aprovado e `latest` movida na execução 42567411650; fora da `main`, `latest` não se move na execução [42566999125](https://github.com/matheuscardosolazzarini/renda-fixa-api/actions/runs/42566999125); o smoke reprovado foi provado localmente, ver `VALIDACAO-F8.md`)
+- [x] Nenhum segredo novo no repositório nem nos logs do Actions (só o `GITHUB_TOKEN`)
 - [x] README com o badge, as instruções para rodar a imagem e o motivo do adiamento da nuvem
 
-Status: **implementada e verificada localmente** em 09/11/2026 (591 testes; `docs/SPEC-F8-EXECUCAO.md`, `docs/VALIDACAO-F8.md`, `docs/QA-F8.md`). Os três critérios do pipeline ficam abertos até a primeira execução real do `release.yml` no GitHub: o merge publicar a tag do SHA no GHCR, o smoke do runner aprovar e mover `latest` (e reprovar sem movê-la), e a ausência de segredo nos logs do Actions. Falta, para marcá-los, o link da execução e a tag do SHA visível no GHCR. Depois do primeiro push, o pacote nasce privado e só o Matheus o torna público nas configurações do pacote.
+Status: **concluída** em 09/11/2026 (PR #3, merge `081c5d5`; 591 testes; `docs/SPEC-F8-EXECUCAO.md`, `docs/VALIDACAO-F8.md`, `docs/QA-F8.md`). Os três critérios do pipeline foram fechados pelas execuções reais do `release.yml` descritas em `VALIDACAO-F8.md`. O pacote do GHCR nasce privado e só o Matheus o torna público nas configurações do pacote.
 
 ### Riscos do QA da F8
 
