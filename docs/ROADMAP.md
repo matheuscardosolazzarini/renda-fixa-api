@@ -100,6 +100,16 @@ Achados da revisão do PR #2, nenhum bloqueante. Os dois primeiros entram na F8,
 
 Comece descrevendo em Terraform a infra que já existe (PostgreSQL Flexible Server, Container Apps e registry). O pipeline só é confiável se a infra puder ser recriada do zero. O build da imagem passa a rodar no runner do GitHub, o que também resolve o bloqueio de ACR Tasks da conta nova.
 
+Recursos que já existem no Azure (conferidos em 08/11/2026 com `az resource list`, assinatura "Azure subscription 1"), todos no resource group `rg-renda-fixa`, e que devem ser importados, não recriados:
+
+| Recurso | Tipo |
+|---|---|
+| `pg-renda-fixa` | PostgreSQL Flexible Server |
+| `workspace-rgrendafixa2ZEb` | Log Analytics workspace |
+| `renda-fixa-api-env` | Container Apps Environment |
+| `cab1c9c07832acr` | Container Registry |
+| `renda-fixa-api` | Container App |
+
 Decisão de 02/11/2026: Terraform em vez de Bicep, por ser o padrão mais pedido em vagas e não ficar preso ao Azure. O custo extra é o state remoto, guardado num Azure Storage Account.
 
 ### Passos
