@@ -4,7 +4,7 @@ Atualizado em 30/10/2026.
 
 ## Objetivo
 
-A v1 (F1 a F6) entregou a API com taxas fixas no `appsettings.json`. A v2 dá o próximo passo: o sistema passa a usar dados de mercado reais, faz deploy sozinho e ganha testes que provam que os cálculos estão certos. A numeração continua a da v1. A ordem é F7, depois F8, depois F9. A F10 é opcional.
+A v1 (F1 a F6) entregou a API com taxas fixas no `appsettings.json`. A v2 dá o próximo passo: o sistema passa a usar dados de mercado reais, publica sozinho uma imagem testada e ganha testes que provam que os cálculos estão certos. A numeração continua a da v1. A ordem é F7, depois F8, depois F9. A F10 é opcional.
 
 Como usar este roadmap:
 
@@ -31,11 +31,11 @@ O comando para em dois pontos para você decidir: na aprovação da spec com os 
 ```mermaid
 flowchart TD
     F7["<b>F7 · Indexadores reais e dias úteis</b><br/>CDI e IPCA do BC, base 252, IPCA+ e IOF"]
-    F8["<b>F8 · CD automatizado e IaC</b><br/>Terraform, OIDC e deploy a cada merge na main"]
+    F8["<b>F8 · Entrega contínua da imagem</b><br/>/health, pendências da F7 e imagem testada no GHCR"]
     F9["<b>F9 · Qualidade</b><br/>Testcontainers, NetArchTest e Stryker.NET"]
     F10["<b>F10 · Observabilidade, cache, eventos</b><br/>Opcional: OpenTelemetry, Redis e outbox"]
     F7 -- "CDB 100% CDI bate com a Calculadora do Cidadão (± R$ 0,01)" --> F8
-    F8 -- "merge na main vai ao ar sem passo manual" --> F9
+    F8 -- "merge na main publica imagem testada sem passo manual" --> F9
     F9 -- "integração no CI e mutation score do Domain ≥ 80%" --> F10
     style F10 stroke-dasharray: 5 5
 ```
@@ -96,11 +96,37 @@ Achados da revisão do PR #2, nenhum bloqueante. Os dois primeiros entram na F8,
 
 - [ ] **Calendário ANBIMA só até 2030.** A partir de 2031 a importação de CDI falha (data fora da cobertura) e projeções com data posterior devolvem 400. Estender o seed com os feriados publicados pela ANBIMA (planilha até 2078) antes do fim de 2030, de preferência já até 2050.
 
-## F8 — CD automatizado e IaC
+## F8 — Entrega contínua da imagem e pendências da F7
 
-Comece descrevendo em Terraform a infra que já existe (PostgreSQL Flexible Server, Container Apps e registry). O pipeline só é confiável se a infra puder ser recriada do zero. O build da imagem passa a rodar no runner do GitHub, o que também resolve o bloqueio de ACR Tasks da conta nova.
+Decisão de 08/11/2026: a publicação em nuvem ficou adiada (ver "Adiado: publicação em nuvem com Terraform"). Terraform que nunca rodou contra um ambiente real não prova nada, então a F8 entrega o que dá para provar sem nuvem: a cada merge, uma imagem versionada, validada contra um PostgreSQL de verdade no próprio pipeline e publicada no GitHub Container Registry, que é gratuito.
 
-Recursos que já existem no Azure (conferidos em 08/11/2026 com `az resource list`, assinatura "Azure subscription 1"), todos no resource group `rg-renda-fixa`, e que devem ser importados, não recriados:
+### Passos
+
+1. Escrever `docs/SPEC-F8-EXECUCAO.md` com o escopo desta seção.
+2. Resolver as duas primeiras "Pendências herdadas da F7" (CDI descartado buscado de novo e JSON truncado sem retry), com o teste antes da correção.
+3. Criar `GET /health`, respondendo 200 quando o processo está de pé, com teste.
+4. Criar o workflow `release.yml`: em push na `main`, depois do CI verde, faz o build da imagem e o push no GHCR (`ghcr.io/matheuscardosolazzarini/renda-fixa-api`) com a tag do SHA do commit, usando só o `GITHUB_TOKEN` (permissão `packages: write`).
+5. Gerar o migration bundle do EF Core (`dotnet ef migrations bundle`) no pipeline e anexá-lo como artefato da execução.
+6. Smoke test no runner: um PostgreSQL 16 como service container, o bundle aplicando as migrations nele, a imagem publicada subindo com `IndexRatesImport:Enabled=false` e respondendo 200 em `/health` e em `GET /api/assets`. Só depois disso a imagem recebe a tag `latest`; se o smoke falhar, a execução falha e `latest` continua apontando para a versão anterior.
+7. README: badge do `release.yml`, como rodar a imagem publicada com o bundle e por que a publicação em nuvem está adiada.
+
+### Critérios de conclusão
+
+- [ ] As duas pendências herdadas da F7 resolvidas, cada uma com teste escrito antes da correção
+- [ ] `GET /health` responde 200, com teste
+- [ ] Um merge na `main` publica no GHCR uma imagem com a tag do SHA, sem nenhum passo manual
+- [ ] O smoke test aplica o bundle num PostgreSQL limpo e a imagem responde 200 em `/health` e `/api/assets`; um smoke que falha marca a execução como falha e não move a tag `latest`
+- [ ] Nenhum segredo novo no repositório nem nos logs do Actions (só o `GITHUB_TOKEN`)
+- [ ] README com o badge, as instruções para rodar a imagem e o motivo do adiamento da nuvem
+
+## Adiado: publicação em nuvem com Terraform
+
+Em 08/11/2026 a assinatura "Azure subscription 1" estava `Disabled` (fim do crédito de avaliação): ela aceita leitura, mas não escrita, e por isso o PostgreSQL está parado e o Container App quebrado. Não há orçamento para reativá-la. Terraform continua sendo a escolha de IaC (decisão de 02/11/2026); a fase volta quando houver um destino. Dois caminhos avaliados:
+
+- **Azure por uso, só com franquias gratuitas:** Container Apps (franquia mensal por assinatura), PostgreSQL no Neon (plano gratuito), imagem no GHCR, logs sem Log Analytics e alerta de orçamento. Exige cartão; o alerta avisa, mas não bloqueia gasto. Antes de reativar, apagar os recursos antigos, senão o PostgreSQL volta a cobrar.
+- **Plataforma gratuita sem cartão** (Render, Koyeb) com Neon: custo zero garantido, sem Azure no currículo.
+
+O rascunho da spec para o Azure, já revisado pelo `revisor-arquitetura` (3 bloqueantes e 13 achados importantes incorporados), está em `docs/RASCUNHO-IAC-AZURE.md` e serve de ponto de partida. Recursos existentes em `rg-renda-fixa`, conferidos em 08/11/2026:
 
 | Recurso | Tipo |
 |---|---|
@@ -109,33 +135,6 @@ Recursos que já existem no Azure (conferidos em 08/11/2026 com `az resource lis
 | `renda-fixa-api-env` | Container Apps Environment |
 | `cab1c9c07832acr` | Container Registry |
 | `renda-fixa-api` | Container App |
-
-Decisão de 02/11/2026: Terraform em vez de Bicep, por ser o padrão mais pedido em vagas e não ficar preso ao Azure. O custo extra é o state remoto, guardado num Azure Storage Account.
-
-### Passos
-
-1. Escrever `docs/SPEC-F8-EXECUCAO.md` com os ambientes, os gatilhos do pipeline e onde cada segredo fica guardado.
-2. Criar o backend de state: um Storage Account com container para o `terraform.tfstate`, com lock nativo do blob. É o único recurso criado fora do Terraform, por um script curto documentado no README.
-3. Criar `infra/` com o provider `azurerm` e módulos para Log Analytics, registry, Container Apps Environment, Container App e PostgreSQL, parametrizados por ambiente (`*.tfvars`). Importar os recursos que já existem no Azure (`terraform import` ou blocos `import`) em vez de recriá-los.
-4. Autenticar o GitHub no Azure via OIDC (federated credentials), sem senha ou client secret no repositório. O mesmo login serve para o Terraform e para o deploy.
-5. Criar o workflow `infra.yml`: em PR que mexe em `infra/`, roda `terraform fmt -check`, `validate` e `plan`; o `apply` é manual (`workflow_dispatch`), para nenhuma mudança de infra entrar sem alguém ler o plano.
-6. Criar o workflow `deploy.yml` ao lado do `ci.yml`: em push na `main`, depois do CI verde, faz o build da imagem, o push pro registry com a tag do SHA do commit e o `az containerapp update`.
-7. Aplicar as migrations do EF Core com um migration bundle (`dotnet ef migrations bundle`) como etapa do pipeline, e não na inicialização da API.
-8. Criar o endpoint `/health`, que hoje não existe no código, e usá-lo num smoke test depois do deploy: se não responder 200, o pipeline falha.
-9. Guardar a connection string como secret do Container App (ou no Key Vault) e deixar mínimo de réplicas em zero para não gerar custo com a API parada. Nenhum segredo vai para o state em texto aberto quando houver alternativa (senha do PostgreSQL gerada e guardada como secret, nunca em `*.tfvars` commitado).
-10. Resolver as duas primeiras "Pendências herdadas da F7" (CDI descartado buscado de novo e JSON truncado sem retry) antes de existir qualquer alerta sobre o log do job.
-
-### Critérios de conclusão
-
-- [ ] O `terraform apply` recria toda a infra num resource group vazio, e um `terraform plan` logo depois não mostra nenhuma mudança
-- [ ] Os recursos que já existiam foram importados, e o primeiro `plan` contra eles não propõe destruir nada
-- [ ] Nenhum `*.tfstate` nem `*.tfvars` com segredo no repositório; o state fica só no Storage Account
-- [ ] Um merge na `main` publica a nova versão sem nenhum passo manual
-- [ ] A imagem leva a tag do SHA, e dá para saber qual commit está rodando
-- [ ] Nenhuma senha ou connection string aparece no repositório nem nos logs do Actions
-- [ ] As migrations são aplicadas pelo pipeline
-- [ ] Um smoke test que falha marca o deploy como falho
-- [ ] O README tem o badge do deploy e um diagrama simples da infra
 
 ## F9 — Qualidade: Testcontainers, NetArchTest e Stryker
 
@@ -182,8 +181,8 @@ Uma tarefa só está concluída quando passa nos sete pontos abaixo, além dos c
 4. A `revisao-de-fase` rodou sem pendências.
 5. O README está atualizado.
 6. Existe um PR descrevendo o que mudou e por quê, mesmo trabalhando sozinho.
-7. A partir da F8, a mudança está no ar no Azure e funcionando.
+7. A partir da F8, a imagem da versão foi publicada no GHCR e passou no smoke test do pipeline.
 
 ## Próximo passo
 
-Rodar `/executar-fase F8` no Claude Code. Antes, deixar o Azure CLI instalado e logado (`az login`) na máquina, com permissão na assinatura e no Entra ID para criar o app registration do OIDC.
+Rodar `/executar-fase F8` no Claude Code, na branch `f8-entrega-continua`, com o escopo de "F8 — Entrega contínua da imagem e pendências da F7".

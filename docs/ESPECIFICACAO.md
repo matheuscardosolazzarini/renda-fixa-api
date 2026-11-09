@@ -26,7 +26,8 @@ projetada para uma data, já líquida de imposto de renda.
 - Importação diária das cotações de CDI e IPCA pela API SGS do Banco Central
 - Rentabilidade de títulos Cdi e Ipca calculada sobre dias úteis, base 252
 - IOF regressivo sobre resgates com menos de 30 dias
-- Deploy contínuo no Azure com infraestrutura como código
+- Entrega contínua da imagem Docker, testada no pipeline (publicação em nuvem e infraestrutura
+  como código adiadas; ver ROADMAP)
 - Testes de integração contra PostgreSQL real, regras de arquitetura e mutation testing
 
 ### Fora do escopo
@@ -209,7 +210,7 @@ quando não há nenhuma cotação de CDI é a de Brasília (`America/Sao_Paulo`)
 com data fora do período coberto pelo calendário (RN-08) é rejeitado com 400.
 
 A F1 previa um health check, mas ele não existe no código da v1. Entra na F8, onde o smoke
-test do deploy depende dele.
+test da imagem publicada depende dele.
 
 ## Arquitetura
 
@@ -252,8 +253,8 @@ São regras que independem de orquestração e precisam ser testáveis sem infra
 | Cotações (v2) | API SGS do Banco Central via HttpClient tipado |
 | Resiliência HTTP (v2) | Microsoft.Extensions.Http.Resilience |
 | Calendário (v2) | Feriados nacionais ANBIMA em tabela própria, carregados por seed |
-| Deploy contínuo (v2) | GitHub Actions com OIDC para Azure Container Apps |
-| Infraestrutura como código (v2) | Terraform com o provider `azurerm` e state remoto num Azure Storage Account |
+| Entrega contínua (v2) | GitHub Actions publica a imagem no GitHub Container Registry a cada merge na `main`, depois de um smoke test no próprio runner |
+| Infraestrutura como código (v2) | Terraform, adiado até existir um ambiente de publicação (decisão de 08/11/2026) |
 | Taxas fixas de indexador (v2) | Removidas: saem a seção `IndexRates` do `appsettings.json` e o `IndexRatesOptions`. Sem cotação, vale a RN-09 |
 | Testes de integração (v2) | Testcontainers com PostgreSQL 16 |
 | Regras de arquitetura (v2) | NetArchTest.Rules |
@@ -298,8 +299,11 @@ pelo SGS, RN-08 a RN-11 e endpoint de cotações. Inclui a migração do PreFixe
 fixas do `appsettings.json`. Testes cobrindo as fronteiras da tabela de
 IOF (dias 29 e 30) e a contagem de dias úteis com feriado, virada de ano e Carnaval.
 
-**F8 — Entrega contínua.** Infraestrutura como código, deploy automático na `main` com OIDC,
-migrations aplicadas pelo pipeline, health check e smoke test depois do deploy.
+**F8 — Entrega contínua da imagem.** Health check, correção das pendências da F7 e um pipeline
+que, a cada merge na `main`, gera a imagem e o migration bundle, valida os dois contra um
+PostgreSQL limpo no runner e publica a imagem no GitHub Container Registry. A publicação em
+nuvem com Terraform ficou adiada: a assinatura do Azure está desabilitada e não há orçamento
+para reativá-la (decisão de 08/11/2026).
 
 **F9 — Qualidade.** Testes de repositório e de integração contra PostgreSQL real com
 Testcontainers, regras de arquitetura com NetArchTest e mutation testing no Domain.
@@ -322,7 +326,8 @@ Na v2, além dos anteriores:
 
 - Um CDB 100% do CDI calculado pela API bate com a Calculadora do Cidadão do Banco Central,
   com diferença de no máximo R$ 0,01 sobre R$ 1.000
-- Um merge na `main` publica a nova versão no Azure sem passo manual
+- Um merge na `main` publica uma imagem versionada e testada no GitHub Container Registry, sem
+  passo manual
 - Testes de integração rodando contra PostgreSQL real no CI
 - Mutation score do Domain de pelo menos 80%
 
