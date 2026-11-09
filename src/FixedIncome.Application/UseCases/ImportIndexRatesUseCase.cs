@@ -82,10 +82,14 @@ public class ImportIndexRatesUseCase : IImportIndexRatesUseCase
             new ImportIndexRatesResponse(cdiImported, cdiDiscarded, ipcaImported));
     }
 
+    // A busca parte do próximo dia útil após a última data importada, e não do dia seguinte: cotação
+    // de CDI em dia não útil é descartada e não avança a última data, então partir de "last + 1"
+    // pediria a mesma data (e repetiria o mesmo aviso) a cada execução.
     private async Task<(int Imported, int Discarded)> ImportCdiAsync(DateOnly today)
     {
         var last = await _indexRateRepository.GetLastReferenceDateAsync(IndexType.Cdi);
-        var from = last?.AddDays(1) ?? FirstImportDate;
+        var calendar = new BusinessDayCalendar(await _holidayRepository.GetAllAsync());
+        var from = last is null ? FirstImportDate : calendar.NextBusinessDay(last.Value);
 
         if (from > today)
         {
@@ -98,7 +102,6 @@ public class ImportIndexRatesUseCase : IImportIndexRatesUseCase
             return (0, 0);
         }
 
-        var calendar = new BusinessDayCalendar(await _holidayRepository.GetAllAsync());
         var accepted = new List<IndexRate>();
 
         foreach (var rate in fetched)

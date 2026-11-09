@@ -44,7 +44,7 @@ public class ImportIndexRatesUseCaseTests
     }
 
     [Fact]
-    public async Task Execucao_incremental_do_cdi_parte_do_dia_seguinte_a_ultima_data_importada()
+    public async Task Execucao_incremental_do_cdi_parte_do_proximo_dia_util_apos_a_ultima_data_importada()
     {
         // Arrange
         var harness = new Harness();
@@ -55,6 +55,82 @@ public class ImportIndexRatesUseCaseTests
 
         // Assert
         Assert.Contains((IndexType.Cdi, new DateOnly(2025, 4, 17), Today), harness.Provider.Calls);
+    }
+
+    [Fact]
+    public async Task Execucao_incremental_do_cdi_pula_feriado_e_fim_de_semana_ate_o_proximo_dia_util()
+    {
+        // Arrange: 17/04/2025 é quinta; 18/04 é a Paixão, 19-20/04 é fim de semana e 21/04 é Tiradentes.
+        var harness = new Harness();
+        harness.Repository.Seed(new IndexRate(IndexType.Cdi, new DateOnly(2025, 4, 17), 0.05m));
+
+        // Act
+        await harness.UseCase.ExecuteAsync();
+
+        // Assert
+        Assert.Contains((IndexType.Cdi, new DateOnly(2025, 4, 22), Today), harness.Provider.Calls);
+    }
+
+    [Fact]
+    public async Task Cdi_importado_na_sexta_nao_chama_o_provedor_no_domingo()
+    {
+        // Arrange: o próximo dia útil após a sexta 25/04 é a segunda 28/04, posterior a hoje (domingo 27/04).
+        var harness = new Harness();
+        harness.Repository.Seed(
+            new IndexRate(IndexType.Cdi, new DateOnly(2025, 4, 25), 0.05m),
+            new IndexRate(IndexType.Ipca, new DateOnly(2025, 4, 1), 0.43m));
+        var useCase = harness.CreateUseCase(new DateTimeOffset(2025, 4, 27, 12, 0, 0, TimeSpan.Zero));
+
+        // Act
+        var response = await useCase.ExecuteAsync();
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.Empty(harness.Provider.Calls);
+    }
+
+    [Fact]
+    public async Task Cdi_importado_na_sexta_busca_apenas_a_segunda_quando_hoje_e_a_segunda()
+    {
+        // Arrange: fronteira em que o próximo dia útil (28/04) é igual a hoje.
+        var harness = new Harness();
+        harness.Repository.Seed(
+            new IndexRate(IndexType.Cdi, new DateOnly(2025, 4, 25), 0.05m),
+            new IndexRate(IndexType.Ipca, new DateOnly(2025, 4, 1), 0.43m));
+        var useCase = harness.CreateUseCase(new DateTimeOffset(2025, 4, 28, 12, 0, 0, TimeSpan.Zero));
+
+        // Act
+        await useCase.ExecuteAsync();
+
+        // Assert
+        Assert.Equal(
+            new[] { (IndexType.Cdi, new DateOnly(2025, 4, 28), new DateOnly(2025, 4, 28)) },
+            harness.Provider.Calls);
+    }
+
+    [Fact]
+    public async Task Cdi_descartado_que_e_o_mais_recente_nao_e_buscado_nem_avisado_de_novo_na_execucao_seguinte()
+    {
+        // Arrange: o provedor devolve 17/04 (quinta, útil) e 19/04 (sábado, descartado e mais recente).
+        var harness = new Harness();
+        harness.Repository.Seed(new IndexRate(IndexType.Cdi, new DateOnly(2025, 4, 16), 0.05m));
+        harness.Provider.Add(
+            new IndexRate(IndexType.Cdi, new DateOnly(2025, 4, 17), 0.05m),
+            new IndexRate(IndexType.Cdi, new DateOnly(2025, 4, 19), 0.05m));
+
+        // Act
+        var first = await harness.UseCase.ExecuteAsync();
+        var warningsAfterFirst = harness.Logger.Entries.Count(e => e.Level == LogLevel.Warning);
+        harness.Provider.Calls.Clear();
+        var second = await harness.UseCase.ExecuteAsync();
+
+        // Assert
+        Assert.Equal(1, first.Data!.CdiImported);
+        Assert.Equal(1, first.Data!.CdiDiscarded);
+        Assert.Equal(1, warningsAfterFirst);
+        Assert.Contains((IndexType.Cdi, new DateOnly(2025, 4, 22), Today), harness.Provider.Calls);
+        Assert.Equal(0, second.Data!.CdiDiscarded);
+        Assert.Equal(1, harness.Logger.Entries.Count(e => e.Level == LogLevel.Warning));
     }
 
     [Fact]

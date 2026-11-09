@@ -1,0 +1,17 @@
+# Ações fixadas por SHA de commit e imagens fixadas por digest não recebem atualização sozinhas:
+# o comentário "# vX.Y.Z" ao lado do SHA e a tag da imagem deixam de acompanhar o upstream.
+# O Dependabot abre o PR de atualização (trocando o SHA/digest e o comentário), então a fixação
+# não vira dependência esquecida.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+
+  # Cobre as imagens base do Dockerfile (sdk:8.0 e aspnet:8.0). A imagem postgres do service
+  # container do release.yml não é lida pelo Dependabot e se atualiza à mão.
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly

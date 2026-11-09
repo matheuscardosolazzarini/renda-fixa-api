@@ -66,6 +66,10 @@ public class SgsIndexRateProvider : IIndexRateProvider
     {
         // O SGS responde 400 quando dataInicial == dataFinal. Para um período de um dia, a consulta
         // começa na véspera e o resultado é filtrado abaixo para manter só o período pedido.
+        // R-16 (QA8-16e, 09/11/2026): por curl direto, datas iguais com dados devolveram 200 e sem
+        // dados devolveram 404 "Value(s) not found"; o 400 que motivou este contorno (F7) não se
+        // reproduziu. O contorno fica porque o 400 pode voltar e o efeito é nulo: o resultado é
+        // filtrado ao período pedido.
         var queryFrom = from == to ? from.AddDays(-1) : from;
 
         var url = $"dados/serie/bcdata.sgs.{series}/dados?formato=json" +

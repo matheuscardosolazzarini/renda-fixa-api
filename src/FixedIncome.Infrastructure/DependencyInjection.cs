@@ -34,13 +34,29 @@ public static class DependencyInjection
         return services;
     }
 
+    // R-05: valores como "0" ou "yes" desligam a importação sem erro; o aviso na partida mostra ao
+    // operador o valor recebido. Chamado pelo Program.cs com o logger do app, já que o registro
+    // do job acontece antes de o contêiner de serviços existir.
+    public static void LogIndexRatesImportStatus(IConfiguration configuration, ILogger logger)
+    {
+        if (IsIndexRatesImportEnabled(configuration))
+        {
+            return;
+        }
+
+        logger.LogInformation(
+            "Importação de cotações desligada (IndexRatesImport:Enabled = '{Value}'). Somente 'true' liga a importação.",
+            configuration["IndexRatesImport:Enabled"] ?? string.Empty);
+    }
+
+    private static bool IsIndexRatesImportEnabled(IConfiguration configuration) =>
+        bool.TryParse(configuration["IndexRatesImport:Enabled"], out var value) && value;
+
     // Só registra o job quando IndexRatesImport:Enabled é "true"; ausente ou inválido conta como
     // desligado, para que nenhum ambiente passe a chamar o Banco Central sem pedir.
     public static IServiceCollection AddIndexRatesImportJob(this IServiceCollection services, IConfiguration configuration)
     {
-        var enabled = bool.TryParse(configuration["IndexRatesImport:Enabled"], out var value) && value;
-
-        if (!enabled)
+        if (!IsIndexRatesImportEnabled(configuration))
         {
             return services;
         }

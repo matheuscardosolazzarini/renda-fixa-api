@@ -26,7 +26,8 @@ projetada para uma data, já líquida de imposto de renda.
 - Importação diária das cotações de CDI e IPCA pela API SGS do Banco Central
 - Rentabilidade de títulos Cdi e Ipca calculada sobre dias úteis, base 252
 - IOF regressivo sobre resgates com menos de 30 dias
-- Deploy contínuo no Azure com infraestrutura como código
+- Entrega contínua da imagem Docker, testada no pipeline (publicação em nuvem e infraestrutura
+  como código adiadas; ver ROADMAP)
 - Testes de integração contra PostgreSQL real, regras de arquitetura e mutation testing
 
 ### Fora do escopo
@@ -193,7 +194,7 @@ valores já arredondados.
 | GET | `/api/positions/{id}/projection?referenceDate=` | Projeção da posição |
 | GET | `/api/portfolio/summary?referenceDate=` | Consolidado da carteira |
 | GET | `/api/indexes/{indexType}?from=&to=` | Cotações de um indexador no período (v2) |
-| GET | `/health` | Health check (v2, F8) |
+| GET | `/health` | Liveness, texto `Healthy`, fora do envelope `ApiResponse<T>` (v2, F8) |
 
 A projeção retorna valor investido, valor bruto, rendimento, alíquota aplicada, imposto
 devido e valor líquido. Na v2, retorna também alíquota e valor de IOF, e indica se a projeção
@@ -208,8 +209,9 @@ informada, as posições aportadas depois dela ficam fora do resumo. A data de "
 quando não há nenhuma cotação de CDI é a de Brasília (`America/Sao_Paulo`). O registro de aporte
 com data fora do período coberto pelo calendário (RN-08) é rejeitado com 400.
 
-A F1 previa um health check, mas ele não existe no código da v1. Entra na F8, onde o smoke
-test do deploy depende dele.
+A F1 previa um health check; ele só foi entregue na F8, onde o smoke test da imagem publicada
+passou a depender dele. `GET /health` é um check de liveness: responde 200 com o texto `Healthy`
+enquanto o processo está de pé, não consulta o banco e só aceita GET e HEAD.
 
 ## Arquitetura
 
@@ -252,8 +254,8 @@ São regras que independem de orquestração e precisam ser testáveis sem infra
 | Cotações (v2) | API SGS do Banco Central via HttpClient tipado |
 | Resiliência HTTP (v2) | Microsoft.Extensions.Http.Resilience |
 | Calendário (v2) | Feriados nacionais ANBIMA em tabela própria, carregados por seed |
-| Deploy contínuo (v2) | GitHub Actions com OIDC para Azure Container Apps |
-| Infraestrutura como código (v2) | Terraform com o provider `azurerm` e state remoto num Azure Storage Account |
+| Entrega contínua (v2) | GitHub Actions publica a imagem no GitHub Container Registry a cada merge na `main`, depois de um smoke test no próprio runner |
+| Infraestrutura como código (v2) | Terraform, adiado até existir um ambiente de publicação (decisão de 08/11/2026) |
 | Taxas fixas de indexador (v2) | Removidas: saem a seção `IndexRates` do `appsettings.json` e o `IndexRatesOptions`. Sem cotação, vale a RN-09 |
 | Testes de integração (v2) | Testcontainers com PostgreSQL 16 |
 | Regras de arquitetura (v2) | NetArchTest.Rules |
@@ -263,14 +265,22 @@ São regras que independem de orquestração e precisam ser testáveis sem infra
 Padrões mantidos do projeto: controller herda `ControllerBase` e retorna
 `StatusCode(response.StatusCode, response)`; respostas encapsuladas em `ApiResponse<T>`;
 configuração de entidade via `IEntityTypeConfiguration` com `HasColumnName` em SNAKE_CASE;
-repositórios assíncronos retornando `Task<IEnumerable<T>>`.
+repositórios assíncronos retornando `Task<IEnumerable<T>>`. O `GET /health` é a exceção à regra
+do envelope: responde o texto puro `Healthy`, porque é um check de liveness, não um recurso de
+negócio.
+
+**Importação das cotações** (v2). Duas regras da importação. A busca incremental do CDI parte do
+próximo dia útil após a última cotação gravada, e não do dia seguinte: cotação em dia não útil é
+descartada e não avança a última data, então partir de "última + 1" pediria a mesma data a cada
+execução. A resposta do SGS só é aceita se for JSON bem formado por inteiro; HTML ou JSON cortado
+é falha transitória e entra no retry, em vez de falhar sem nova tentativa.
 
 Comentários em português, identificadores em inglês.
 
 ## Fases
 
 **F1 — Fundação.** Solution com os quatro projetos, referências entre camadas, Docker
-Compose com PostgreSQL, health check respondendo.
+Compose com PostgreSQL (o health check previsto aqui só foi entregue na F8).
 
 **F2 — Domínio.** Entidades, enums, validações de invariante, cálculo de rentabilidade e
 apuração de IR. Testes de domínio cobrindo RN-01 a RN-05, incluindo as quatro faixas da
@@ -298,8 +308,11 @@ pelo SGS, RN-08 a RN-11 e endpoint de cotações. Inclui a migração do PreFixe
 fixas do `appsettings.json`. Testes cobrindo as fronteiras da tabela de
 IOF (dias 29 e 30) e a contagem de dias úteis com feriado, virada de ano e Carnaval.
 
-**F8 — Entrega contínua.** Infraestrutura como código, deploy automático na `main` com OIDC,
-migrations aplicadas pelo pipeline, health check e smoke test depois do deploy.
+**F8 — Entrega contínua da imagem.** Health check, correção das pendências da F7 e um pipeline
+que, a cada merge na `main`, gera a imagem e o migration bundle, valida os dois contra um
+PostgreSQL limpo no runner e publica a imagem no GitHub Container Registry. A publicação em
+nuvem com Terraform ficou adiada: a assinatura do Azure está desabilitada e não há orçamento
+para reativá-la (decisão de 08/11/2026).
 
 **F9 — Qualidade.** Testes de repositório e de integração contra PostgreSQL real com
 Testcontainers, regras de arquitetura com NetArchTest e mutation testing no Domain.
@@ -322,7 +335,8 @@ Na v2, além dos anteriores:
 
 - Um CDB 100% do CDI calculado pela API bate com a Calculadora do Cidadão do Banco Central,
   com diferença de no máximo R$ 0,01 sobre R$ 1.000
-- Um merge na `main` publica a nova versão no Azure sem passo manual
+- Um merge na `main` publica uma imagem versionada e testada no GitHub Container Registry, sem
+  passo manual
 - Testes de integração rodando contra PostgreSQL real no CI
 - Mutation score do Domain de pelo menos 80%
 

@@ -1,6 +1,6 @@
 # Controle de Investimentos em Renda Fixa
 
-![CI](https://github.com/matheuscardosolazzarini/renda-fixa-api/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/matheuscardosolazzarini/renda-fixa-api/actions/workflows/ci.yml/badge.svg) ![Release](https://github.com/matheuscardosolazzarini/renda-fixa-api/actions/workflows/release.yml/badge.svg)
 
 API em .NET 8 para consolidação de carteira de renda fixa, com cálculo de rentabilidade
 líquida de imposto de renda.
@@ -20,6 +20,10 @@ uma data de referência, já descontado o imposto devido.
 A API cobre o cadastro de títulos, o registro de aportes, a projeção de uma posição para
 uma data, a consolidação da carteira e a consulta das cotações de CDI e IPCA importadas do
 Banco Central. Dez endpoints, documentados no Swagger.
+
+`GET /health` é um health check de liveness, à parte dessa contagem. Responde 200 com o texto
+`Healthy` enquanto o processo está de pé e não consulta o banco: o 200 ali não garante conexão
+com o PostgreSQL. Quem prova a conexão é `GET /api/assets`.
 
 Uma ausência é deliberada:
 
@@ -71,7 +75,8 @@ As cotações vêm da API SGS do Banco Central: a série 12 (CDI, em % ao dia) e
 a cada 6 horas. As séries publicam no máximo uma vez por dia, então a repetição existe para
 recuperar falhas temporárias do provedor sem intervenção manual.
 
-A importação é controlada por `IndexRatesImport:Enabled` no `appsettings.json`. Ela fica
+A importação é controlada por `IndexRatesImport:Enabled` no `appsettings.json` (em variável de
+ambiente, `IndexRatesImport__Enabled`). Ela fica
 ligada por padrão; nos testes da API fica desligada, para nenhum teste depender da internet.
 
 ### Dias úteis
@@ -293,17 +298,160 @@ dotnet run --project src/FixedIncome.Api
 O `dotnet tool restore` não é opcional: o `dotnet-ef` está fixado como ferramenta local em
 `.config/dotnet-tools.json`, para que a versão usada aqui e no CI seja a mesma.
 
+**Variável de ambiente que sobra no terminal.** Se `ConnectionStrings__DefaultConnection` estiver
+definida no terminal, ela tem precedência sobre o `appsettings.Development.json` no `dotnet ef`, no
+`dotnet run` e no bundle. Uma variável esquecida de uma sessão anterior faz o `dotnet ef database
+update` migrar outro banco sem nenhum aviso. Para conferir sem imprimir a senha e para limpar:
+
+```bash
+[ -n "$ConnectionStrings__DefaultConnection" ] && echo definida || echo "não definida"
+unset ConnectionStrings__DefaultConnection
+```
+
+```powershell
+Test-Path Env:ConnectionStrings__DefaultConnection
+Remove-Item Env:ConnectionStrings__DefaultConnection
+```
+
+Variável vazia ou só com espaços é ignorada pela fábrica do `dotnet ef`, que volta ao arquivo.
+A opção `--connection` do `dotnet ef` vence o arquivo.
+
 O arquivo `src/FixedIncome.Api/FixedIncome.Api.http` traz requisições de exemplo na ordem
 de um fluxo real: criar título, listar, registrar aporte, projetar, consolidar. No fim,
 consultam-se as cotações de CDI e IPCA e são feitas projeções de um CDB em CDI e de um CDB
-IPCA+.
+IPCA+. A variável de base no topo do arquivo aponta para a porta 5124, a do `dotnet run`; para
+a API em Docker (Compose ou imagem publicada, porta 8080), troque o número na primeira linha.
 
 As cotações de CDI e IPCA são importadas do Banco Central ao iniciar a API e a cada 6 horas.
-Para desligar a importação, defina `IndexRatesImport:Enabled` como `false`. Sem cotações
-importadas, a projeção de CDI e de IPCA+ falha; a de PreFixed não depende delas.
+Para desligar a importação, defina `IndexRatesImport:Enabled` como `false` (em variável de
+ambiente, `IndexRatesImport__Enabled=false`). Sem cotações importadas, a projeção de CDI e de
+IPCA+ falha; a de PreFixed não depende delas.
 
 A migration não é aplicada na inicialização — a decisão está registrada acima e comentada
 no `Program.cs`.
+
+### Imagem publicada
+
+A cada merge na `main`, o workflow `release.yml` roda o CI e, com ele verde, publica a imagem
+da API no GitHub Container Registry, em `ghcr.io/matheuscardosolazzarini/renda-fixa-api`. Antes
+de a imagem ser promovida, o próprio workflow a testa:
+
+1. Gera o migration bundle do EF Core e o anexa à execução como artefato `efbundle-<sha>`. O
+   artefato fica disponível por 7 dias, e baixá-lo exige login no GitHub.
+2. Publica a imagem com a tag do SHA do commit, `ghcr.io/matheuscardosolazzarini/renda-fixa-api:<sha>`.
+3. Aplica o bundle num PostgreSQL limpo e sobe a imagem baixada do registro contra esse banco.
+   A execução só passa se `/health` e `/api/assets` responderem 200.
+4. Só depois disso move a tag `latest` para a mesma imagem, e só se o commit ainda for o topo da
+   `main` naquele momento. Se a `main` já avançou (num re-run de uma execução antiga, por
+   exemplo), o log traz um aviso e `latest` não se move.
+
+Logo, `latest` é a versão aprovada pelo smoke test. A tag do SHA é a candidata: se o smoke
+falhar, ela continua no registro, mas `latest` segue apontando para a versão anterior.
+
+O workflow também pode ser disparado à mão (`workflow_dispatch`, pela aba Actions do GitHub), com a
+mesma trava do `latest`: só move a tag a partir da `main` e com o commit ainda no topo. Push que só
+altera arquivos de `docs/` ou `.md` da raiz (como este README) não dispara o release.
+
+**Aplicando o bundle.** O download do artefato vem compactado em zip. O bundle é um executável
+linux-x64, então roda em Linux ou no WSL. Ele lê a connection string pela mesma variável que a
+API, `ConnectionStrings__DefaultConnection`. O `--connection` é opcional, mas a variável é
+obrigatória mesmo assim, porque a fábrica do contexto a exige:
+
+```bash
+chmod +x efbundle
+ConnectionStrings__DefaultConnection="Host=localhost;Port=5432;Database=fixedincome;Username=fixedincome;Password=fixedincome" ./efbundle
+```
+
+Os blocos bash desta seção são para Linux ou WSL. No PowerShell 5.1, `chmod` e `VAR=valor comando`
+não existem, e o bundle não roda direto no Windows. Há dois caminhos: abrir o terminal do WSL e
+usar o bloco acima, ou executar o bundle num contêiner Linux `runtime-deps`, com a pasta do
+`efbundle` montada e a variável passada com `-e`, numa linha só (`host.docker.internal` é o host do
+banco a partir do contêiner no Docker Desktop):
+
+```powershell
+docker run --rm -v "${PWD}:/work" -w /work -e "ConnectionStrings__DefaultConnection=Host=host.docker.internal;Port=5432;Database=fixedincome;Username=fixedincome;Password=fixedincome" mcr.microsoft.com/dotnet/runtime-deps:8.0 sh -c 'chmod +x ./efbundle && ./efbundle'
+```
+
+Para gerar o bundle a partir do código, em vez de baixar o artefato, use o mesmo comando do workflow,
+com a saída na pasta atual (`--output efbundle`, em vez de `artifacts/efbundle`), depois de `dotnet tool restore`:
+
+```bash
+dotnet ef migrations bundle --project src/FixedIncome.Infrastructure --startup-project src/FixedIncome.Api --configuration Release --self-contained --target-runtime linux-x64 --output efbundle --force
+```
+
+**Migration alvo e reversão.** O bundle aceita uma migration como argumento e leva o banco até ela
+(`./efbundle 20260818070004_InitialCreate`); sem argumento, aplica todas. Um nome que não existe
+termina com erro (`The migration '...' was not found`). O argumento `0` reverte todas as migrations,
+e o bundle não pede confirmação: `./efbundle 0` remove as tabelas da aplicação, com os dados, e
+deixa só o histórico de migrations (`__EFMigrationsHistory`), vazio. Confira o banco apontado pela
+connection string antes de rodar.
+
+**Lendo um erro do bundle.** A causa vem na primeira linha da saída, e a pilha completa vem depois
+(comportamento padrão do EF). Leia a primeira linha. Alguns exemplos:
+
+- `28P01: password authentication failed`: usuário ou senha errados;
+- `Name or service not known` ou `Connection refused`: host ou porta errados;
+- `Host can't be null`: a connection string chegou sem host. Acontece com `--connection ""`, ou seja,
+  a opção veio vazia (por exemplo, de uma variável de shell que não estava definida). Com
+  `--connection` vazio o bundle não cai de volta na variável `ConnectionStrings__DefaultConnection`;
+- `Connection string não encontrada`: a variável está ausente, vazia ou só com espaços. A mensagem
+  cita também o `appsettings.Development.json`, que não vale para o bundle: o que resolve é definir a
+  variável.
+
+A senha não aparece na saída do bundle nem nos logs da API, nos casos exercitados no QA.
+
+**Nome do banco.** Se o banco da connection string não existir, o bundle o cria e aplica as
+migrations nele, e termina com sucesso: é o EF que cria o banco ao aplicar as migrations. Um erro
+de digitação no `Database=` vira um banco novo e vazio, enquanto a API continua apontando para o
+banco certo. Confira o nome do banco na connection string antes de rodar o bundle.
+
+**Rodando a imagem publicada.** Suba o banco do Compose e aplique o bundle antes da API. Se o
+serviço `api` do Compose estiver rodando, ele ocupa a porta 8080: pare-o antes com
+`docker compose stop api`. A imagem publicada roda em Production, sem Swagger: o endereço
+`/swagger` da seção anterior vale só para o Compose, que usa Development. Depois:
+
+```bash
+docker pull ghcr.io/matheuscardosolazzarini/renda-fixa-api:latest
+docker run -d --name renda-fixa-api-ghcr -p 8080:8080 \
+  -e ConnectionStrings__DefaultConnection="Host=host.docker.internal;Port=5432;Database=fixedincome;Username=fixedincome;Password=fixedincome" \
+  ghcr.io/matheuscardosolazzarini/renda-fixa-api:latest
+```
+
+No PowerShell 5.1 a `\` não continua a linha: escreva o `docker run` numa linha só.
+
+```powershell
+docker run -d --name renda-fixa-api-ghcr -p 8080:8080 -e "ConnectionStrings__DefaultConnection=Host=host.docker.internal;Port=5432;Database=fixedincome;Username=fixedincome;Password=fixedincome" ghcr.io/matheuscardosolazzarini/renda-fixa-api:latest
+```
+
+`host.docker.internal` é o host do banco a partir do contêiner no Docker Desktop (Windows e
+macOS). No Linux, essa ponte não existe por padrão: troque `-p 8080:8080` por `--network host` e
+o host por `localhost`.
+
+**Importação de cotações na imagem.** Com a importação ligada (padrão do `appsettings.json`), a
+imagem chama a API do Banco Central ao subir. Para desligá-la, acrescente
+`-e IndexRatesImport__Enabled=false` ao `docker run`. Em variável de ambiente o separador é `__`,
+não `:`: `IndexRatesImport:Enabled` é a forma do `appsettings.json`. Só `true` (ou a variável
+ausente) mantém a importação ligada; qualquer outro valor, como `1` ou `yes`, a desliga, e a API
+registra no log da partida que a importação está desligada.
+
+**Ordem de subida.** Aplique o bundle antes de subir a imagem. Se ela subiu antes, enquanto o
+bundle não for aplicado `GET /health` continua respondendo 200, mas todo `/api/*` responde 500
+(as tabelas não existem). Depois de aplicar o bundle, as rotas de `/api/*` voltam a responder 200 sem
+reiniciar a API. Com a importação ligada, porém, a da partida já falhou por falta da tabela
+`index_rate`, e o próximo ciclo só ocorre em 6 horas: até lá a projeção de CDI e de IPCA+ falha.
+Reinicie o contêiner (`docker restart renda-fixa-api-ghcr`) para a importação rodar de novo.
+
+**Aviso sobre o pacote.** O pacote nasce privado no GHCR. Enquanto o autor do repositório não o
+tornar público nas configurações do pacote, o `docker pull` só funciona com login no GitHub
+(`docker login ghcr.io`).
+
+### Por que a nuvem está adiada
+
+A publicação em nuvem com Terraform está adiada desde 08/11/2026. A assinatura do Azure foi
+desabilitada ao fim do crédito de avaliação, e não há orçamento para reativá-la. Terraform que
+nunca rodou contra um ambiente real não prova nada, então a fase volta quando houver um destino.
+Até lá, a entrega é a imagem no GHCR, validada no próprio pipeline. Os dois caminhos avaliados
+estão descritos em [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Testes
 
@@ -311,14 +459,14 @@ no `Program.cs`.
 dotnet test
 ```
 
-558 testes, executados a cada push pelo GitHub Actions.
+591 testes, executados a cada push pelo GitHub Actions.
 
 | Camada | Testes | Linha | Branch |
 |---|---|---|---|
 | Domain | 292 | 95,2% | 98,1% |
-| Application | 105 | 92,5% | 98,9% |
-| Infrastructure | 110 | 95,6% | 98,1% |
-| Api | 51 | 96,3% | 89,1% |
+| Application | 112 | 92,6% | 98,9% |
+| Infrastructure | 130 | 99,7% | 98,4% |
+| Api | 57 | 96,4% | 91,3% |
 
 Cobertura medida com o coverlet e o `coverlet.runsettings` do CI, projeto a projeto; cada linha da
 tabela traz a cobertura do assembly da própria camada (os assemblies referenciados também são

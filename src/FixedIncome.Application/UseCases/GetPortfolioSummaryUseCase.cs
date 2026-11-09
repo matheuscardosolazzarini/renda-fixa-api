@@ -87,8 +87,21 @@ public class GetPortfolioSummaryUseCase : IGetPortfolioSummaryUseCase
                 foreach (var position in positions)
                 {
                     var asset = assets[position.AssetId];
-                    var projection = position.Project(asset, DateFor(position), market);
-                    projections.Add((projection, asset.AssetType));
+
+                    try
+                    {
+                        var projection = position.Project(asset, DateFor(position), market);
+                        projections.Add((projection, asset.AssetType));
+                    }
+                    // R-10: com várias posições, "Cotação de CDI ausente" sozinha não diz qual falhou,
+                    // e a causa mais comum é a importação desligada ou ainda não executada. Outros
+                    // erros de domínio seguem com a mensagem original (tratados no catch externo).
+                    catch (DomainException ex) when (ex.Message.StartsWith("Cotação de CDI ausente", StringComparison.Ordinal))
+                    {
+                        return ApiResponse<PortfolioSummaryResponse>.BadRequest(
+                            $"Posição {position.Id} (título '{asset.Name}'): {ex.Message} "
+                            + "A importação de cotações pode estar desligada (IndexRatesImport:Enabled) ou ainda não ter rodado.");
+                    }
                 }
             }
             catch (DomainException ex)

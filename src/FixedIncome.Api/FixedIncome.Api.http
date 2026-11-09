@@ -1,3 +1,5 @@
+# Base da API: 5124 com `dotnet run`, 8080 com Docker (Compose ou imagem publicada).
+# Para usar o Docker, troque 5124 por 8080 na linha abaixo.
 @FixedIncome.Api_HostAddress = http://localhost:5124
 
 ### Criar título
@@ -132,5 +134,8 @@ Content-Type: application/json
 ### Projeção do CDB IPCA+ (isEstimated indica mês sem IPCA divulgado)
 GET {{FixedIncome.Api_HostAddress}}/api/positions/{{createIpcaPosition.response.body.$.data.id}}/projection?referenceDate=2026-07-01
 Accept: application/json
+
+### Health check (liveness: 200 com o texto Healthy, sem consultar o banco)
+GET {{FixedIncome.Api_HostAddress}}/health
 
 ###

@@ -14,12 +14,23 @@ var builder = WebApplication.CreateBuilder(args);
 // aninhada, "__" equivale a ":") tem prioridade sobre o appsettings, sem removê-lo: é o
 // que mantém `dotnet run` local funcionando com appsettings.Development.json.
 var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
-    ?? builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection não configurada.");
+    ?? builder.Configuration.GetConnectionString("DefaultConnection");
+
+// R-17: uma exceção não tratada sairia com pilha e com exit code 134/139 (aborto do runtime), que
+// um orquestrador leria como falha de memória. Mensagem direta e exit 1 deixam a causa óbvia.
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    Console.Error.WriteLine(
+        "Connection string do banco não configurada. Defina a variável de ambiente "
+        + "ConnectionStrings__DefaultConnection ou a chave ConnectionStrings:DefaultConnection "
+        + "na configuração (appsettings).");
+    return 1;
+}
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(connectionString);
 builder.Services.AddIndexRatesImportJob(builder.Configuration);
+builder.Services.AddHealthChecks();
 
 // Enums saem como texto no JSON, alinhado à decisão de persistir enums como texto no
 // banco: um valor inserido no meio do enum (ex.: nova posição em AssetType) não pode
@@ -109,6 +120,8 @@ builder.Services.AddSwaggerGen(options =>
 
 var app = builder.Build();
 
+FixedIncome.Infrastructure.DependencyInjection.LogIndexRatesImportStatus(app.Configuration, app.Logger);
+
 // Não é chamado Database.Migrate() na inicialização: em ambiente com múltiplas instâncias
 // duas poderiam migrar simultaneamente, e uma falha de migration impediria a aplicação de
 // subir. A execução é manual:
@@ -147,7 +160,15 @@ app.UseAuthorization();
 
 app.MapControllers();
 
+// Liveness: só diz que o processo responde, sem checagem registrada e sem consultar o banco
+// (o /health/ready com o PostgreSQL é da F10). Restrito a GET e HEAD: sem isso o MapHealthChecks
+// aceita qualquer verbo.
+app.MapHealthChecks("/health")
+    .WithMetadata(new HttpMethodMetadata(new[] { "GET", "HEAD" }));
+
 app.Run();
+
+return 0;
 
 public partial class Program
 {

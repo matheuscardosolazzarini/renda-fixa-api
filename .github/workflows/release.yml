@@ -1,0 +1,234 @@
+name: Release
+
+on:
+  push:
+    # TEMPORÁRIO: remover f8-entrega-continua antes do merge (teste do pipeline na branch)
+    branches: [main, f8-entrega-continua]
+    # Commit só de documentação não muda a imagem: sem isto ele geraria CI duplicado, imagem
+    # nova e um bundle de ~120 MB retido à toa.
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
+  # Republica a `latest` à mão depois de um smoke instável, sem precisar de commit novo nem de
+  # re-run. Está sujeito à mesma trava do passo `latest` (ref da main e SHA no topo da main).
+  workflow_dispatch:
+
+# Permissão mínima por padrão; o job de release eleva só o que precisa (packages: write).
+permissions:
+  contents: read
+
+# Uma execução por vez, sem cancelar a que está em andamento: a ordem das execuções
+# preserva a ordem em que a tag `latest` é movida. Se chegarem várias enquanto uma roda,
+# o GitHub mantém só a mais recente na fila e descarta as intermediárias.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # Reaproveita o CI como workflow reutilizável: a imagem só é publicada com build e testes verdes.
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  # Job próprio, só com leitura: gerar o bundle restaura ferramentas e compila o projeto (código de
+  # terceiros), e isso não deve acontecer num job com permissão de escrita no GHCR.
+  bundle:
+    name: Migration bundle
+    needs: ci
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Configurar .NET 8
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: "8.0.x"
+
+      # Instala a versão do dotnet-ef fixada em .config/dotnet-tools.json.
+      - name: Restaurar ferramentas locais
+        run: dotnet tool restore
+
+      # O bundle é self-contained: aplica as migrations sem SDK nem runtime no destino. A criação não
+      # precisa de connection string; a execução precisa, pela variável ConnectionStrings__DefaultConnection
+      # (a mesma que a API lê), porque a fábrica do contexto a exige mesmo quando vem `--connection`.
+      - name: Gerar migration bundle
+        run: >
+          dotnet ef migrations bundle
+          --project src/FixedIncome.Infrastructure
+          --startup-project src/FixedIncome.Api
+          --configuration Release
+          --self-contained
+          --target-runtime linux-x64
+          --output artifacts/efbundle
+          --force
+
+      # O upload-artifact@v4 não preserva o bit de execução: quem baixar o bundle precisa
+      # rodar `chmod +x efbundle` antes de executá-lo. Retenção de 7 dias porque são ~120 MB por merge.
+      - name: Publicar bundle como artefato
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: efbundle-${{ github.sha }}
+          path: artifacts/efbundle
+          retention-days: 7
+          overwrite: true
+
+  release:
+    name: Imagem, smoke e latest
+    needs: bundle
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # empurrar a imagem (tag do SHA e latest) para o GHCR
+    env:
+      IMAGE: ghcr.io/matheuscardosolazzarini/renda-fixa-api
+      # Valores do contexto entram no shell só por variável de ambiente (nunca interpolados no script).
+      COMMIT_SHA: ${{ github.sha }}
+      REPOSITORY: ${{ github.repository }}
+      # Banco descartável do smoke: a senha literal não é segredo, o service container morre com o job.
+      SMOKE_CONNECTION: "Host=localhost;Port=5432;Database=smoke;Username=smoke;Password=smoke"
+    # PostgreSQL limpo para o smoke; o pg_isready segura o início dos passos até o banco aceitar conexões.
+    services:
+      postgres:
+        # postgres:16 (16.15 quando o digest foi fixado). O Dependabot não atualiza imagem de
+        # service container: ao subir de versão, trocar o digest à mão.
+        image: postgres:16@sha256:f9a7b9ebf6f56201f949db745e47bc423c0f0f8294bafe991cc10bf74b029657
+        env:
+          POSTGRES_DB: smoke
+          POSTGRES_USER: smoke
+          POSTGRES_PASSWORD: smoke
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U smoke -d smoke"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      # O checkout fornece o Dockerfile e o contexto do `docker build`.
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # Baixa o artefato publicado pelo job `bundle`: o smoke aplica o bundle baixado, que é o
+      # caminho de implantação, e não um arquivo gerado neste runner. O .dockerignore exclui
+      # `artifacts/` do contexto da imagem.
+      - name: Baixar bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: efbundle-${{ github.sha }}
+          path: artifacts
+
+      # O token vai por variável de ambiente e stdin, nunca interpolado no script, para não
+      # aparecer na linha de comando nem em logs.
+      - name: Login no GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+
+      # O rótulo `source` vincula o pacote do GHCR a este repositório; `revision` registra o commit.
+      - name: Build da imagem (candidata)
+        run: >
+          docker build
+          --tag "$IMAGE:$COMMIT_SHA"
+          --label "org.opencontainers.image.source=https://github.com/$REPOSITORY"
+          --label "org.opencontainers.image.revision=$COMMIT_SHA"
+          .
+
+      # A tag do SHA é a candidata: só a `latest` indica versão aprovada.
+      - name: Push da imagem (tag do SHA)
+        run: docker push "$IMAGE:$COMMIT_SHA"
+
+      # Aplica as migrations num banco limpo com o bundle baixado do artefato, e não com o
+      # código-fonte: o que se prova é o caminho de implantação. A conexão vai pela variável que a API
+      # também lê (a fábrica do contexto a exige mesmo no bundle). O download não preserva o bit de
+      # execução, então o chmod faz o mesmo que quem baixa o bundle.
+      - name: Smoke - aplicar bundle no banco limpo
+        run: |
+          chmod +x artifacts/efbundle
+          ./artifacts/efbundle
+        env:
+          ConnectionStrings__DefaultConnection: ${{ env.SMOKE_CONNECTION }}
+
+      # Remove a cópia local e baixa do GHCR: sem isso o `docker run` usaria o cache do build e não
+      # provaria o que está no registro. `--network host` deixa a API alcançar o PostgreSQL do service
+      # container em localhost. A importação de índices fica desligada porque chamaria o Banco Central.
+      - name: Smoke - subir a imagem baixada do GHCR
+        run: |
+          docker image rm "$IMAGE:$COMMIT_SHA"
+          docker pull "$IMAGE:$COMMIT_SHA"
+          docker run -d --name api --network host \
+            -e ConnectionStrings__DefaultConnection="$SMOKE_CONNECTION" \
+            -e IndexRatesImport__Enabled=false \
+            "$IMAGE:$COMMIT_SHA"
+
+      # Prazo real de 60 s medido pelo relógio do shell ($SECONDS), e não pelo número de voltas:
+      # cada tentativa leva no máximo 2 s (--max-time), então o laço termina em até ~62 s.
+      - name: Smoke - esperar a API responder
+        run: |
+          start=$SECONDS
+          end=$((SECONDS+60))
+          while [ "$SECONDS" -lt "$end" ]; do
+            if curl --silent --max-time 2 --output /dev/null --fail http://localhost:8080/health; then
+              echo "API respondeu 200 em /health após $((SECONDS-start))s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "API não respondeu 200 em /health no prazo de 60s"
+          exit 1
+
+      # /health não consulta o banco; o /api/assets é que prova a conexão e as migrations aplicadas.
+      - name: Smoke - exigir 200 em /health e /api/assets
+        run: |
+          curl --silent --show-error --fail http://localhost:8080/health
+          echo
+          curl --silent --show-error --fail --output /dev/null --write-out '/api/assets -> %{http_code}\n' http://localhost:8080/api/assets
+
+      - name: Smoke - logs da API (em caso de falha)
+        if: failure()
+        run: docker logs api || echo "contêiner api não foi criado"
+
+      - name: Smoke - remover contêiner
+        if: always()
+        run: docker rm --force api
+
+      # Trava do `latest`: só a main move a tag, e só se este commit ainda for o topo da main no remoto
+      # agora. Sem isso, um re-run (ou dispatch) de execução antiga empurraria a `latest` para trás.
+      # Consulta ao remoto no último momento, depois do smoke, para encurtar a janela de corrida.
+      # Se a consulta falhar, o passo falha e a `latest` não se move (falha segura).
+      - name: Decidir se a latest deve mover
+        id: latest_gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REF: ${{ github.ref }}
+        run: |
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::warning::O ref é $REF, não refs/heads/main; a tag latest não foi movida."
+            echo "move=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          head_sha=$(gh api "repos/$REPOSITORY/commits/main" --jq .sha)
+          if [ "$head_sha" != "$COMMIT_SHA" ]; then
+            echo "::warning::O commit $COMMIT_SHA não é mais o topo da main ($head_sha); a tag latest não foi movida."
+            echo "move=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "move=true" >> "$GITHUB_OUTPUT"
+
+      # Só chega aqui se o smoke passou (status implícito success()) e a trava liberou.
+      - name: Push da imagem (tag latest)
+        if: steps.latest_gate.outputs.move == 'true'
+        run: |
+          docker tag "$IMAGE:$COMMIT_SHA" "$IMAGE:latest"
+          docker push "$IMAGE:latest"
