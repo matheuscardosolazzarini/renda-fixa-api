@@ -371,3 +371,31 @@ que o Dependabot não atualiza (troca manual, dita em comentário).
 
 Veredito mantido: **APROVADA**, com os três critérios do pipeline abertos até a primeira execução
 real.
+
+## Execuções reais do pipeline
+
+Fecham os três critérios que ficaram abertos acima. As duas execuções e o resultado de cada uma
+foram informados pelo Matheus. O orquestrador não as reverificou no GitHub (o `gh` não está
+instalado nesta máquina); a única checagem local é no git, que mostra o merge `081c5d5` (PR #3) e,
+logo antes dele, o commit `1fbd129` com o gatilho temporário da branch.
+
+| Execução | Onde | O que provou |
+|---|---|---|
+| [42566999125](https://github.com/matheuscardosolazzarini/renda-fixa-api/actions/runs/42566999125) | branch `f8-entrega-continua` (gatilho temporário no `release.yml`) | A `latest` não se move fora da `main`: a trava `latest_gate` funcionou no runner |
+| [42567411650](https://github.com/matheuscardosolazzarini/renda-fixa-api/actions/runs/42567411650) | merge `081c5d5` na `main` | Push da tag do SHA no GHCR, smoke aprovado e `latest` movida, sem passo manual |
+
+Critérios fechados pelas execuções:
+
+- [x] Um merge na `main` publica no GHCR uma imagem com a tag do SHA (critério 3): execução 42567411650
+- [x] O smoke no runner aprova e move `latest` (critério 4, parte do runner): execução 42567411650. A
+  trava fora da `main` fica provada pela execução 42566999125
+- [x] Nenhum segredo nos logs do Actions (critério 5, parte dos logs): informado pelo Matheus a
+  partir dessas execuções
+
+Limite que permanece: nenhuma execução real teve o smoke **reprovado**. A parte "um smoke que falha
+marca a execução como falha e não move `latest`" do critério 4 se apoia na reprovação reproduzida
+localmente (sem o bundle, `/api/assets` devolve 500 e o passo sai com exit 22) e na semântica do
+`if` do passo `latest`, que só roda com o `success()` implícito. Se quiser prova no runner, basta
+uma execução de `workflow_dispatch` com o smoke quebrado de propósito numa branch descartável.
+
+Com isso, a F8 está **concluída**: o veredito **APROVADA** vale sem itens abertos de pipeline.
