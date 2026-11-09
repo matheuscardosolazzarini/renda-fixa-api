@@ -2,7 +2,8 @@ name: Release
 
 on:
   push:
-    branches: [main]
+    # TEMPORÁRIO: remover f8-entrega-continua antes do merge (teste do pipeline na branch)
+    branches: [main, f8-entrega-continua]
     # Commit só de documentação não muda a imagem: sem isto ele geraria CI duplicado, imagem
     # nova e um bundle de ~120 MB retido à toa.
     paths-ignore:
