@@ -113,4 +113,19 @@ public class IncomeTaxTableTests
         // Assert
         Assert.Throws<DomainException>(act);
     }
+
+    [Fact]
+    public void RateFor_com_prazo_negativo_informa_que_o_prazo_nao_pode_ser_negativo()
+    {
+        // Arrange
+        var assetType = AssetType.Cdb;
+        var elapsedDays = -1;
+
+        // Act
+        Action act = () => IncomeTaxTable.RateFor(assetType, elapsedDays);
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Contains("prazo decorrido não pode ser negativo", exception.Message);
+    }
 }

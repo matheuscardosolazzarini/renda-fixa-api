@@ -1,18 +1,21 @@
 using FixedIncome.Infrastructure.Repositories;
+using FixedIncome.Tests.Shared;
 using Microsoft.EntityFrameworkCore;
 
 namespace FixedIncome.Infrastructure.Tests.Repositories;
 
-public class HolidayRepositoryTests : RepositoryTestBase
+[Collection("PostgreSQL")]
+public class HolidayRepositoryTests(PostgreSqlFixture fixture) : RepositoryTestBase(fixture)
 {
     [Fact]
-    public async Task EnsureCreated_materializa_os_139_feriados_semeados()
+    public async Task Migrations_aplicadas_materializam_os_139_feriados_semeados()
     {
         // Arrange
-        await Context.Database.EnsureCreatedAsync();
+        // O seed vem das migrations aplicadas no modelo do qual o banco do teste foi copiado.
+        using var contexto = CriarContexto();
 
         // Act
-        var quantidade = await Context.Holidays.CountAsync();
+        var quantidade = await contexto.Holidays.CountAsync();
 
         // Assert
         Assert.Equal(139, quantidade);
@@ -22,8 +25,8 @@ public class HolidayRepositoryTests : RepositoryTestBase
     public async Task Listar_feriados_retorna_os_semeados_em_ordem_crescente_de_data()
     {
         // Arrange
-        await Context.Database.EnsureCreatedAsync();
-        var repository = new HolidayRepository(Context);
+        using var contexto = CriarContexto();
+        var repository = new HolidayRepository(contexto);
 
         // Act
         var datas = (await repository.GetAllAsync()).Select(h => h.Date).ToList();
@@ -39,8 +42,8 @@ public class HolidayRepositoryTests : RepositoryTestBase
     public async Task Feriados_de_2023_sao_12_e_de_2024_em_diante_sao_13()
     {
         // Arrange
-        await Context.Database.EnsureCreatedAsync();
-        var repository = new HolidayRepository(Context);
+        using var contexto = CriarContexto();
+        var repository = new HolidayRepository(contexto);
 
         // Act
         var datas = (await repository.GetAllAsync()).Select(h => h.Date).ToList();
@@ -55,8 +58,8 @@ public class HolidayRepositoryTests : RepositoryTestBase
     public async Task Dia_da_Consciencia_Negra_so_entra_nos_feriados_a_partir_de_2024()
     {
         // Arrange
-        await Context.Database.EnsureCreatedAsync();
-        var repository = new HolidayRepository(Context);
+        using var contexto = CriarContexto();
+        var repository = new HolidayRepository(contexto);
 
         // Act
         var datas = (await repository.GetAllAsync()).Select(h => h.Date).ToList();
@@ -70,8 +73,8 @@ public class HolidayRepositoryTests : RepositoryTestBase
     public async Task Feriado_semeado_tem_id_fixo_derivado_da_data()
     {
         // Arrange
-        await Context.Database.EnsureCreatedAsync();
-        var repository = new HolidayRepository(Context);
+        using var contexto = CriarContexto();
+        var repository = new HolidayRepository(contexto);
 
         // Act
         var holidays = (await repository.GetAllAsync()).ToList();

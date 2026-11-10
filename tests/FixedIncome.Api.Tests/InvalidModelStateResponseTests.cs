@@ -1,9 +1,11 @@
+using FixedIncome.Tests.Shared;
 using System.Net;
 using System.Net.Http.Json;
 
 namespace FixedIncome.Api.Tests;
 
-public class InvalidModelStateResponseTests : ApiTestBase
+[Collection("PostgreSQL")]
+public class InvalidModelStateResponseTests(PostgreSqlFixture postgres) : ApiTestBase(postgres)
 {
     [Fact]
     public async Task Json_malformado_retorna_mensagem_de_corpo_invalido_em_portugues()

@@ -1,0 +1,51 @@
+name: Mutation testing
+
+on:
+  # Segunda-feira, 06:00 UTC (03:00 em Brasília).
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+# O workflow só lê o código e publica um artefato; não precisa de escrita no repositório.
+permissions:
+  contents: read
+
+jobs:
+  stryker:
+    name: Stryker (Domain)
+    runs-on: ubuntu-latest
+    # O padrão do GitHub é 360 minutos; a execução local leva cerca de 2 minutos.
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Nenhum passo faz git push; sem isso o token ficaria gravado em .git/config.
+          persist-credentials: false
+
+      - name: Configurar .NET 8
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: "8.0.x"
+
+      # A versão do Stryker vem de .config/dotnet-tools.json.
+      - name: Restaurar ferramentas locais
+        run: dotnet tool restore
+
+      # Os testes do Domain não usam Docker. O Stryker restaura e compila o projeto de testes
+      # sozinho; o limite de 80% (`break`) está em stryker-config.json e reprova o passo se o
+      # score ficar abaixo dele.
+      - name: Stryker no Domain
+        working-directory: tests/FixedIncome.Domain.Tests
+        run: dotnet stryker
+
+      # `if: always()`: o relatório precisa existir também quando o score fica abaixo do limite.
+      - name: Publicar relatório de mutação
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: stryker-report
+          path: tests/FixedIncome.Domain.Tests/StrykerOutput
+          # Nome fixo: num re-run o artefato da tentativa anterior já existe.
+          overwrite: true
+          retention-days: 30

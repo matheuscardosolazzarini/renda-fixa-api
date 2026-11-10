@@ -498,3 +498,6 @@ crash.log
 
 # Migration bundle gerado na raiz (README, --output efbundle)
 efbundle
+
+# Stryker.NET
+StrykerOutput/

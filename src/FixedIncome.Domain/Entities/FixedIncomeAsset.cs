@@ -11,7 +11,9 @@ public class FixedIncomeAsset : BaseEntity
     public const decimal RateLimit = 1_000_000_000_000m;
     public const int RateDecimalPlaces = 6;
 
+    // Stryker disable once String : valor inicial sempre sobrescrito pelo construtor público e, na materialização do EF, pela coluna name (IsRequired); não é observável
     public string Name { get; private set; } = string.Empty;
+    // Stryker disable once String : valor inicial sempre sobrescrito pelo construtor público e, na materialização do EF, pela coluna issuer (IsRequired); não é observável
     public string Issuer { get; private set; } = string.Empty;
     public AssetType AssetType { get; private set; }
     public IndexType IndexType { get; private set; }
@@ -91,6 +93,7 @@ public class FixedIncomeAsset : BaseEntity
 
         if (rate >= RateLimit)
         {
+            // Stryker disable once String : RateLimit tem escala 0 (1_000_000_000_000m), então ToString("0") e ToString("") (formato geral) produzem o mesmo texto
             throw new DomainException($"Rate deve ser menor que {RateLimit.ToString("0", CultureInfo.InvariantCulture)}.");
         }
 

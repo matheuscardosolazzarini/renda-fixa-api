@@ -1,3 +1,4 @@
+using FixedIncome.Tests.Shared;
 using System.Net;
 using System.Net.Http.Json;
 using FixedIncome.Domain.Entities;
@@ -7,7 +8,8 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace FixedIncome.Api.Tests;
 
-public class PositionProjectionFlowTests : ApiTestBase
+[Collection("PostgreSQL")]
+public class PositionProjectionFlowTests(PostgreSqlFixture postgres) : ApiTestBase(postgres)
 {
     [Fact]
     public async Task Fluxo_completo_cria_titulo_aporte_e_obtem_projecao_coerente()

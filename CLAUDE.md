@@ -69,6 +69,12 @@ Nomeie os testes descrevendo o comportamento esperado, não o método chamado.
 Cada regra de negócio da especificação precisa de teste, incluindo os casos de
 fronteira — especialmente os limites das faixas da tabela regressiva de IR.
 
+Regras de dependência entre camadas são testes no projeto `FixedIncome.Architecture.Tests`,
+com NetArchTest.Rules: violação quebra o build.
+
+Mutation testing do Domain: `dotnet tool restore` e, em `tests/FixedIncome.Domain.Tests`,
+`dotnet stryker`. O limite de score é 80%; abaixo disso o comando falha.
+
 ## Restrições
 
 Não adicione pacotes NuGet além dos já presentes sem justificar a necessidade.
@@ -85,4 +91,4 @@ Rules:
 - If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
 - Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
 - After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
-- A committed graphify-out/graph.json is rewritten whole on every build, so a large diff to it in a pull request is expected. Do not flag it as churn or suggest skipping the graph rebuild or its hooks.
+- O graphify-out/ é local e está no .gitignore: não é versionado, e o grafo é reconstruído com `graphify update .` em cada máquina. (Se um dia o graph.json for commitado, o diff grande dele no PR é esperado e não é ruído a apontar.)

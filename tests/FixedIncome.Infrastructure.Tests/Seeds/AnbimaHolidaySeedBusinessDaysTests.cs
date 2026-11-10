@@ -1,13 +1,14 @@
 using FixedIncome.Domain.ValueObjects;
 using FixedIncome.Infrastructure.Repositories;
-using Microsoft.EntityFrameworkCore;
+using FixedIncome.Tests.Shared;
 
 namespace FixedIncome.Infrastructure.Tests.Seeds;
 
 // Contagem de dias úteis por ano civil do seed ANBIMA, conforme a seção "Feriados ANBIMA" de
 // docs/SPEC-F7-EXECUCAO.md. O seed chega ao calendário pelo mesmo caminho da aplicação: HasData
-// materializado pelo contexto e lido pelo repositório.
-public class AnbimaHolidaySeedBusinessDaysTests : RepositoryTestBase
+// aplicado pelas migrations no PostgreSQL e lido pelo repositório.
+[Collection("PostgreSQL")]
+public class AnbimaHolidaySeedBusinessDaysTests(PostgreSqlFixture fixture) : RepositoryTestBase(fixture)
 {
     [Theory]
     [InlineData(2020, 251)]
@@ -48,7 +49,6 @@ public class AnbimaHolidaySeedBusinessDaysTests : RepositoryTestBase
 
     private async Task<BusinessDayCalendar> CriarCalendarioAsync()
     {
-        await Context.Database.EnsureCreatedAsync();
         var holidays = await new HolidayRepository(Context).GetAllAsync();
 
         return new BusinessDayCalendar(holidays);

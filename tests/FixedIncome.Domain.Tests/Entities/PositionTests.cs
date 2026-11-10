@@ -9,6 +9,126 @@ namespace FixedIncome.Domain.Tests.Entities;
 
 public class PositionTests
 {
+    [Fact]
+    public void Titulo_nulo_e_rejeitado_informando_que_o_asset_e_obrigatorio()
+    {
+        // Arrange
+        FixedIncomeAsset? asset = null;
+
+        // Act
+        Action act = () => new Position(asset!, 1000m, new DateOnly(2024, 6, 1));
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Contains("Asset é obrigatório", exception.Message);
+    }
+
+    [Fact]
+    public void Valor_investido_zero_informa_que_deve_ser_maior_que_zero()
+    {
+        // Arrange
+        var asset = CriarAsset();
+
+        // Act
+        Action act = () => new Position(asset, 0m, new DateOnly(2024, 6, 1));
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Contains("InvestedAmount deve ser maior que zero", exception.Message);
+    }
+
+    [Fact]
+    public void Aporte_fora_do_periodo_do_titulo_informa_que_deve_estar_entre_emissao_e_vencimento()
+    {
+        // Arrange
+        var asset = CriarAsset();
+
+        // Act
+        Action act = () => new Position(asset, 1000m, asset.MaturityDate.AddDays(1));
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Contains("ApplicationDate deve estar entre a emissão e o vencimento", exception.Message);
+    }
+
+    [Fact]
+    public void Projecao_sem_dados_de_mercado_e_rejeitada_com_argument_null_exception()
+    {
+        // Arrange
+        var asset = CriarAsset();
+        var position = new Position(asset, 1000m, asset.IssueDate);
+
+        // Act
+        Action act = () => position.Project(asset, asset.IssueDate.AddDays(30), null!);
+
+        // Assert
+        var exception = Assert.Throws<ArgumentNullException>(act);
+        Assert.Equal("market", exception.ParamName);
+    }
+
+    [Fact]
+    public void Projecao_com_titulo_de_outra_posicao_informa_que_o_titulo_nao_corresponde()
+    {
+        // Arrange
+        var asset = CriarAsset();
+        var otherAsset = CriarAsset();
+        var position = new Position(asset, 1000m, asset.IssueDate);
+
+        // Act
+        Action act = () => position.Project(otherAsset, asset.IssueDate.AddDays(30), Market);
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Contains("título informado não corresponde a esta posição", exception.Message);
+    }
+
+    [Fact]
+    public void Projecao_com_data_de_referencia_anterior_ao_aporte_informa_que_a_data_nao_pode_ser_anterior()
+    {
+        // Arrange
+        var asset = CriarAsset();
+        var applicationDate = new DateOnly(2024, 6, 1);
+        var position = new Position(asset, 1000m, applicationDate);
+
+        // Act
+        Action act = () => position.Project(asset, applicationDate.AddDays(-1), Market);
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Contains("data de referência não pode ser anterior à data de aporte", exception.Message);
+    }
+
+    [Fact]
+    public void Projecao_de_titulo_com_indexador_fora_do_enum_informa_que_o_indexador_nao_e_suportado()
+    {
+        // Arrange: o valor 99 não existe em IndexType; a entidade do título não valida o enum.
+        var asset = CriarAsset(indexType: (IndexType)99);
+        var position = new Position(asset, 1000m, asset.IssueDate);
+
+        // Act
+        Action act = () => position.Project(asset, asset.IssueDate.AddDays(30), Market);
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Contains("IndexType não suportado: 99", exception.Message);
+    }
+
+    [Fact]
+    public void Projecao_de_ipca_sem_nenhuma_cotacao_publicada_informa_que_nao_ha_cotacao_para_estimar()
+    {
+        // Arrange: 2026-03-02 a 2026-03-10 tem dias úteis, então o mês de março é consultado
+        // e, sem nenhum IPCA na série, não há última variação para estimar.
+        var asset = CriarAsset(indexType: IndexType.Ipca, issueDate: new DateOnly(2026, 3, 2));
+        var position = new Position(asset, 1000m, asset.IssueDate);
+
+        // Act
+        Action act = () => position.Project(asset, new DateOnly(2026, 3, 10), Market);
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Contains("Não há cotação de IPCA publicada", exception.Message);
+    }
+
     private static readonly MarketData Market = TestMarket.Create();
 
     [Fact]
@@ -386,7 +506,10 @@ public class PositionTests
     }
 
     private static FixedIncomeAsset CriarAsset(
-        decimal rate = 10m, AssetType assetType = AssetType.Cdb, DateOnly? issueDate = null)
+        decimal rate = 10m,
+        AssetType assetType = AssetType.Cdb,
+        DateOnly? issueDate = null,
+        IndexType indexType = IndexType.PreFixed)
     {
         var issue = issueDate ?? new DateOnly(2020, 1, 1);
         var maturity = issueDate is null ? new DateOnly(2030, 1, 1) : issue.AddYears(2);
@@ -395,7 +518,7 @@ public class PositionTests
             "Título Teste",
             "Emissor Teste",
             assetType,
-            IndexType.PreFixed,
+            indexType,
             rate,
             issue,
             maturity);

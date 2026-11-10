@@ -1,8 +1,10 @@
+using FixedIncome.Tests.Shared;
 using System.Net;
 
 namespace FixedIncome.Api.Tests;
 
-public class HealthEndpointTests : ApiTestBase
+[Collection("PostgreSQL")]
+public class HealthEndpointTests(PostgreSqlFixture postgres) : ApiTestBase(postgres)
 {
     [Fact]
     public async Task Get_health_retorna_200_com_o_texto_Healthy_sem_envelope()

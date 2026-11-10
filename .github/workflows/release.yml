@@ -3,11 +3,14 @@ name: Release
 on:
   push:
     branches: [main]
-    # Commit só de documentação não muda a imagem: sem isto ele geraria CI duplicado, imagem
-    # nova e um bundle de ~120 MB retido à toa.
+    # Commit só de documentação, de testes ou do workflow de mutação não muda a imagem: sem isto
+    # ele geraria CI duplicado, imagem nova e um bundle de ~120 MB retido à toa. O stryker-config.json
+    # mora em tests/ e já está coberto por "tests/**". O ci.yml continua rodando no push à main.
     paths-ignore:
       - "docs/**"
       - "*.md"
+      - "tests/**"
+      - ".github/workflows/mutation.yml"
   # Republica a `latest` à mão depois de um smoke instável, sem precisar de commit novo nem de
   # re-run. Está sujeito à mesma trava do passo `latest` (ref da main e SHA no topo da main).
   workflow_dispatch:

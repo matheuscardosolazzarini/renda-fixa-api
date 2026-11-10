@@ -59,4 +59,32 @@ public class HolidayTests
         // Assert
         Assert.Throws<DomainException>(act);
     }
+
+    [Fact]
+    public void Nome_vazio_informa_que_o_nome_e_obrigatorio()
+    {
+        // Arrange
+        var date = new DateOnly(2026, 9, 7);
+
+        // Act
+        Action act = () => new Holiday(date, "");
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Contains("nome do feriado é obrigatório", exception.Message);
+    }
+
+    [Fact]
+    public void Nome_longo_demais_informa_o_limite_de_120_caracteres()
+    {
+        // Arrange
+        var name = new string('a', 121);
+
+        // Act
+        Action act = () => new Holiday(new DateOnly(2026, 9, 7), name);
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Contains("no máximo 120 caracteres", exception.Message);
+    }
 }

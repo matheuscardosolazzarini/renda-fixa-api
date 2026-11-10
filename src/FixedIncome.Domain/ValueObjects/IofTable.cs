@@ -21,7 +21,9 @@ public static class IofTable
         }
 
         // Dia 0 não tem rendimento e, a partir do dia 30, o IOF deixa de incidir (RN-11).
-        if (elapsedDays == 0 || elapsedDays > Rates.Length)
+        // O disable fica inline para cobrir só a comparação >: o == do dia 0 continua medido. O Stryker
+        // silencia junto o mutante < dessa mesma comparação, que é morto pelos testes (verificado sem o disable).
+        if (elapsedDays == 0 || /* Stryker disable once Equality : Rates[^1] (dia 30) vale 0m, então >= só difere de > no dia 30, onde as duas saídas são 0m */ elapsedDays > Rates.Length)
         {
             return 0m;
         }

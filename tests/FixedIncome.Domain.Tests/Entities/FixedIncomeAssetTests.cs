@@ -385,11 +385,132 @@ public class FixedIncomeAssetTests
         Assert.Equal(12m, asset.Rate);
     }
 
-    private static FixedIncomeAsset CriarAsset(IndexType indexType, decimal rate, AssetType assetType = AssetType.Cdb)
+    [Fact]
+    public void Nome_com_exatamente_120_caracteres_e_aceito()
+    {
+        // Arrange
+        var name = new string('A', 120);
+
+        // Act
+        var asset = new FixedIncomeAsset(
+            name, "Banco X", AssetType.Cdb, IndexType.PreFixed, 12m, new DateOnly(2024, 1, 1), new DateOnly(2026, 1, 1));
+
+        // Assert
+        Assert.Equal(name, asset.Name);
+    }
+
+    [Fact]
+    public void Emissor_com_exatamente_120_caracteres_e_aceito()
+    {
+        // Arrange
+        var issuer = new string('A', 120);
+
+        // Act
+        var asset = new FixedIncomeAsset(
+            "CDB Banco X", issuer, AssetType.Cdb, IndexType.PreFixed, 12m, new DateOnly(2024, 1, 1), new DateOnly(2026, 1, 1));
+
+        // Assert
+        Assert.Equal(issuer, asset.Issuer);
+    }
+
+    [Fact]
+    public void Update_com_nome_e_emissor_de_exatamente_120_caracteres_e_aceito()
+    {
+        // Arrange
+        var asset = CriarAsset(IndexType.PreFixed, rate: 12m);
+        var name = new string('N', 120);
+        var issuer = new string('I', 120);
+
+        // Act
+        asset.Update(name, issuer, asset.Rate, asset.IssueDate, asset.MaturityDate, hasPositions: false);
+
+        // Assert
+        Assert.Equal(name, asset.Name);
+        Assert.Equal(issuer, asset.Issuer);
+    }
+
+    [Fact]
+    public void Nome_invalido_informa_a_regra_de_tamanho_do_nome()
+    {
+        // Arrange
+        var name = new string('A', 121);
+
+        // Act
+        Action act = () => CriarAsset(IndexType.PreFixed, 12m, name: name);
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Contains("Name deve ser não vazio", exception.Message);
+    }
+
+    [Fact]
+    public void Emissor_invalido_informa_a_regra_de_tamanho_do_emissor()
+    {
+        // Arrange
+        var issuer = new string('A', 121);
+
+        // Act
+        Action act = () => CriarAsset(IndexType.PreFixed, 12m, issuer: issuer);
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Contains("Issuer deve ser não vazio", exception.Message);
+    }
+
+    [Fact]
+    public void Taxa_zero_informa_que_a_taxa_deve_ser_maior_que_zero()
+    {
+        // Arrange
+        var rate = 0m;
+
+        // Act
+        Action act = () => CriarAsset(IndexType.PreFixed, rate);
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Contains("Rate deve ser maior que zero", exception.Message);
+    }
+
+    [Fact]
+    public void Vencimento_igual_a_emissao_informa_que_o_vencimento_deve_ser_posterior()
+    {
+        // Arrange
+        var date = new DateOnly(2024, 1, 1);
+
+        // Act
+        Action act = () => new FixedIncomeAsset(
+            "CDB Banco X", "Banco X", AssetType.Cdb, IndexType.PreFixed, 12m, date, date);
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Contains("MaturityDate deve ser posterior a IssueDate", exception.Message);
+    }
+
+    [Fact]
+    public void Update_com_aportes_e_data_alterada_informa_que_as_datas_nao_podem_mudar()
+    {
+        // Arrange
+        var asset = CriarAsset(IndexType.PreFixed, rate: 12m);
+
+        // Act
+        Action act = () => asset.Update(
+            asset.Name, asset.Issuer, asset.Rate, asset.IssueDate.AddDays(1), asset.MaturityDate, hasPositions: true);
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Contains("Não é possível alterar IssueDate ou MaturityDate", exception.Message);
+    }
+
+    private static FixedIncomeAsset CriarAsset(
+        IndexType indexType,
+        decimal rate,
+        AssetType assetType = AssetType.Cdb,
+        string name = "Título Teste",
+        string issuer = "Emissor Teste")
     {
         return new FixedIncomeAsset(
-            "Título Teste",
-            "Emissor Teste",
+            name,
+            issuer,
             assetType,
             indexType,
             rate,
