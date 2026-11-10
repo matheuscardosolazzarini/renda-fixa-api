@@ -173,13 +173,13 @@ Comece pelo Testcontainers. É o que mais aumenta a confiança nos repositórios
 
 ### Critérios de conclusão
 
-- [ ] Os testes de integração rodam com `dotnet test`, local e no CI, sem PostgreSQL instalado na máquina (local atendido: 659 testes verdes com Docker; falta a execução real do `ci.yml` num PR)
+- [x] Os testes de integração rodam com `dotnet test`, local e no CI, sem PostgreSQL instalado na máquina (local: 659 testes verdes com Docker; CI: provado no PR #11, execução [42725508992](https://github.com/matheuscardosolazzarini/renda-fixa-api/actions/runs/42725508992), e de novo na `main` depois do merge `699aa29`, com CI e Release verdes)
 - [x] Violar uma regra de arquitetura de propósito quebra o build (testar uma vez e desfazer) (prova do P5 e reprodução independente do QA, `docs/QA-F9-parteA.md`, QA9-17)
 - [x] Mutation score do Domain em pelo menos 80% (99,33%, `docs/VALIDACAO-F9.md`)
-- [ ] O relatório do Stryker fica salvo como artifact do workflow (falta a execução manual do `mutation.yml` no GitHub, depois do merge)
+- [x] O relatório do Stryker fica salvo como artifact do workflow (artefato `stryker-report` publicado pela execução manual do `mutation.yml`, [42727252936](https://github.com/matheuscardosolazzarini/renda-fixa-api/actions/runs/42727252936))
 - [x] Nenhum teste depende da ordem de execução ou dos dados de outro teste (banco por teste; limitação do xUnit 2 na inversão de ordem registrada em `docs/VALIDACAO-F9.md`)
 
-Status: **implementada, aguardando PR** (659 testes, antes 591; `docs/SPEC-F9-EXECUCAO.md`, `docs/VALIDACAO-F9.md`, `docs/QA-F9.md`). Ficam abertos dois critérios que só uma execução real no GitHub prova: os testes de integração no `ci.yml` (provados no PR) e o artefato `stryker-report` (Matheus roda o `mutation.yml` manualmente depois do merge).
+Status: **concluída** em 09/11/2026 (PR #11, merge `699aa29`; 659 testes, antes 591; `docs/SPEC-F9-EXECUCAO.md`, `docs/VALIDACAO-F9.md`, `docs/QA-F9.md`). Os dois critérios que dependiam do GitHub foram fechados pelas execuções reais descritas em `VALIDACAO-F9.md`.
 
 ### Riscos do QA da F9
 
