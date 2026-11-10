@@ -90,7 +90,7 @@ Achados da revisão do PR #2, nenhum bloqueante. Os dois primeiros entram na F8,
 
 - [x] **CDI descartado buscado de novo para sempre.** Cotação de CDI em dia não útil é descartada, mas a última data importada não avança: toda execução busca a mesma data e registra o mesmo aviso. Tratar antes de criar alertas sobre o log do job. Resolvida na F8: a busca parte do próximo dia útil após a última cotação (`VALIDACAO-F8.md`).
 - [x] **JSON truncado sem retry.** O `SgsNonJsonResponseHandler` só trata como falha transitória o corpo que não começa com `{` ou `[`; um JSON truncado que começa com `{` falha sem nova tentativa. Resolvida na F8: o corpo precisa ser JSON bem formado por inteiro (`VALIDACAO-F8.md`).
-- [ ] **R-01 ao vivo.** Repetir entre 21h e 24h de Brasília o cenário do `QA-F7.md` (tabela de cotações vazia, projeção sem data) para confirmar fora do teste de unidade que "hoje" é a data de Brasília.
+- [x] **R-01 ao vivo.** Repetir entre 21h e 24h de Brasília o cenário do `QA-F7.md` (tabela de cotações vazia, projeção sem data) para confirmar fora do teste de unidade que "hoje" é a data de Brasília. Executado em 09/11/2026 às 22h de Brasília (01h UTC de 10/11): projeção e resumo sem data deram `elapsedDays 12` e bruto R$ 1003,15, iguais aos de 2026-11-09 e diferentes dos de 2026-11-10 (seção "R-01 ao vivo" do `QA-F7.md`). Repetido na imagem do Dockerfile com o contêiner em UTC (`docker exec date` = UTC), mesmos valores.
 
 ## Manutenção
 
