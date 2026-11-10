@@ -1,10 +1,12 @@
+using FixedIncome.Tests.Shared;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 
 namespace FixedIncome.Api.Tests;
 
-public class FrameworkErrorResponsesTests : ApiTestBase
+[Collection("PostgreSQL")]
+public class FrameworkErrorResponsesTests(PostgreSqlFixture postgres) : ApiTestBase(postgres)
 {
     [Fact]
     public async Task Rota_inexistente_retorna_404_no_formato_api_response()

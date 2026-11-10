@@ -1,3 +1,4 @@
+using FixedIncome.Tests.Shared;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
@@ -5,9 +6,11 @@ using System.Text;
 namespace FixedIncome.Api.Tests;
 
 // B-01 e B-07: valores que o banco não guarda (numeric(18,6) e numeric(18,2)) devem voltar 400
-// com mensagem útil, nunca 500. O InMemory não impõe a precisão da coluna, então estes testes
-// provam que a recusa vem do domínio, antes de tocar o banco.
-public class ColumnLimitsTests : ApiTestBase
+// com mensagem útil, nunca 500. O banco real impõe a precisão da coluna (um valor acima do limite
+// estoura ao gravar), então estes testes continuam provando que a recusa vem do domínio, antes de
+// tocar o banco.
+[Collection("PostgreSQL")]
+public class ColumnLimitsTests(PostgreSqlFixture postgres) : ApiTestBase(postgres)
 {
     private static StringContent Json(string body) => new(body, Encoding.UTF8, "application/json");
 

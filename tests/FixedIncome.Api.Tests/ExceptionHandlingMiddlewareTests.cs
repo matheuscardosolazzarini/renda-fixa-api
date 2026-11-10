@@ -1,3 +1,4 @@
+using FixedIncome.Tests.Shared;
 using System.Net;
 using FixedIncome.Application.Common;
 using FixedIncome.Application.DTOs;
@@ -8,7 +9,8 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace FixedIncome.Api.Tests;
 
-public class ExceptionHandlingMiddlewareDomainExceptionTests : ApiTestBase
+[Collection("PostgreSQL")]
+public class ExceptionHandlingMiddlewareDomainExceptionTests(PostgreSqlFixture postgres) : ApiTestBase(postgres)
 {
     protected override void ConfigureTestServices(IServiceCollection services)
     {
@@ -42,7 +44,8 @@ public class ExceptionHandlingMiddlewareDomainExceptionTests : ApiTestBase
     }
 }
 
-public class ExceptionHandlingMiddlewareUnhandledExceptionTests : ApiTestBase
+[Collection("PostgreSQL")]
+public class ExceptionHandlingMiddlewareUnhandledExceptionTests(PostgreSqlFixture postgres) : ApiTestBase(postgres)
 {
     protected override void ConfigureTestServices(IServiceCollection services)
     {

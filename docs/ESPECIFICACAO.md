@@ -257,9 +257,9 @@ São regras que independem de orquestração e precisam ser testáveis sem infra
 | Entrega contínua (v2) | GitHub Actions publica a imagem no GitHub Container Registry a cada merge na `main`, depois de um smoke test no próprio runner |
 | Infraestrutura como código (v2) | Terraform, adiado até existir um ambiente de publicação (decisão de 08/11/2026) |
 | Taxas fixas de indexador (v2) | Removidas: saem a seção `IndexRates` do `appsettings.json` e o `IndexRatesOptions`. Sem cotação, vale a RN-09 |
-| Testes de integração (v2) | Testcontainers com PostgreSQL 16 |
+| Testes de integração (v2) | Testcontainers com PostgreSQL 16 (`postgres:16`): um contêiner por coleção de testes; cada teste ganha um banco próprio, criado a partir de um banco-modelo com as migrations aplicadas |
 | Regras de arquitetura (v2) | NetArchTest.Rules |
-| Mutation testing (v2) | Stryker.NET, em workflow separado |
+| Mutation testing (v2) | Stryker.NET no Domain, com limite de 80% (`break`), em workflow separado (`mutation.yml`: semanal e sob demanda, fora do CI de cada push) |
 | Navegação do código | graphify, com o grafo local em `graphify-out/`, fora do versionamento |
 
 Padrões mantidos do projeto: controller herda `ControllerBase` e retorna

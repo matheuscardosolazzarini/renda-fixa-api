@@ -176,11 +176,13 @@ tests/
   FixedIncome.Application.Tests
   FixedIncome.Infrastructure.Tests
   FixedIncome.Api.Tests
+  FixedIncome.Architecture.Tests
 ```
 
 Dependências apontam para dentro: `Api → Application → Domain`, com `Infrastructure`
 implementando as interfaces declaradas em `Application`. O projeto `Domain` não tem
-nenhuma referência de projeto nem de pacote — restrição verificada a cada revisão de fase.
+nenhuma referência de projeto nem de pacote de infraestrutura. Essas regras de camada são
+testes automatizados, descritos na seção [Qualidade](#qualidade): uma violação quebra o build.
 
 ## Decisões técnicas
 
@@ -286,7 +288,8 @@ O Swagger fica em `http://localhost:8080/swagger`.
 
 ### Localmente, com o SDK
 
-Requer .NET 8 SDK e Docker.
+Requer .NET 8 SDK e Docker. O `global.json` fixa o SDK 8.0 (aceita 8.0.100 ou um 8.0.x mais novo):
+com só o SDK 9 ou 10 instalado, o `dotnet` recusa o projeto em vez de compilar com outra versão.
 
 ```bash
 docker compose up -d db
@@ -459,14 +462,33 @@ estão descritos em [`docs/ROADMAP.md`](docs/ROADMAP.md).
 dotnet test
 ```
 
-591 testes, executados a cada push pelo GitHub Actions.
+659 testes, executados a cada push pelo GitHub Actions.
+
+**Docker precisa estar em execução.** Os testes de repositório (`FixedIncome.Infrastructure.Tests`)
+e de ponta a ponta (`FixedIncome.Api.Tests`) rodam contra um PostgreSQL 16 real, subido pelo
+Testcontainers. Sem Docker, esses testes falham com a mensagem "Os testes de integração precisam
+do Docker em execução. Inicie o Docker (e confira a variável DOCKER_HOST, se você a definiu) e rode
+os testes de novo." Eles nunca são pulados. A mesma mensagem aparece para qualquer falha ao subir o
+contêiner, e a exceção original fica como causa dela. O xUnit repete a falha em cada teste da
+coleção (dezenas de vezes, com pilha): leia a primeira mensagem da saída e ignore o resto. Os
+testes de `Domain`, `Application` e `Architecture` não dependem de Docker. Para rodar só esses:
+
+```bash
+dotnet test tests/FixedIncome.Domain.Tests
+dotnet test tests/FixedIncome.Application.Tests
+dotnet test tests/FixedIncome.Architecture.Tests
+```
 
 | Camada | Testes | Linha | Branch |
 |---|---|---|---|
-| Domain | 292 | 95,2% | 98,1% |
+| Domain | 332 | 96,3% | 100% |
 | Application | 112 | 92,6% | 98,9% |
-| Infrastructure | 130 | 99,7% | 98,4% |
+| Infrastructure | 150 | 99,7% | 98,4% |
 | Api | 57 | 96,4% | 91,3% |
+| Architecture | 8 | sem cobertura | sem cobertura |
+
+O projeto `FixedIncome.Architecture.Tests` só verifica dependências entre camadas e não tem código de
+produção próprio, por isso não entra na medição de cobertura.
 
 Cobertura medida com o coverlet e o `coverlet.runsettings` do CI, projeto a projeto; cada linha da
 tabela traz a cobertura do assembly da própria camada (os assemblies referenciados também são
@@ -480,8 +502,70 @@ individualmente.
 
 Além dos testes automatizados, o fluxo foi validado manualmente contra o PostgreSQL real:
 tipos de coluna, persistência dos enums como texto e a chave estrangeira com `RESTRICT`.
-Provider InMemory não verifica nenhuma dessas três coisas — teste verde e sistema correto
-são afirmações diferentes.
+Até a F8, os testes de repositório usavam o provider InMemory, que não verifica nenhuma dessas
+três coisas; desde a F9 eles rodam contra PostgreSQL real, na seção Qualidade. Teste verde e
+sistema correto continuam sendo afirmações diferentes.
+
+## Qualidade
+
+Três frentes garantem o que os testes de unidade sozinhos não garantem: que a persistência
+funciona de verdade, que as camadas não se misturam e que os testes realmente pegam erro.
+
+**Testes de integração com PostgreSQL real.** Cada coleção de testes sobe um contêiner
+`postgres:16` pelo Testcontainers, em porta aleatória, sem depender de um banco rodando na
+máquina. A imagem é a Debian (glibc), a mesma do smoke test do `release.yml`; o `docker-compose.yml`
+usa a `postgres:16-alpine`, menor, para o banco de desenvolvimento. É a mesma versão do PostgreSQL,
+e nenhum teste depende da ordenação de texto, que é o que muda entre as duas imagens. Um banco-modelo recebe as migrations, e cada teste ganha um banco próprio copiado dele,
+descartado no fim. Assim o teste enxerga o esquema real e nenhum teste vê os dados de outro.
+Exige Docker em execução, como descrito em [Testes](#testes).
+
+**Regras de arquitetura com NetArchTest.** O projeto `FixedIncome.Architecture.Tests` usa o
+NetArchTest.Rules 1.3.2 para verificar as dependências entre camadas: `Domain` não depende de
+outras camadas nem de pacotes de infraestrutura; `Application` não depende de `Infrastructure`
+nem de `Api`; os controllers não dependem de `Infrastructure` nem de EF Core; e nenhum tipo de `Domain`,
+`Application` ou `Api` (controllers ou não) depende de `DbContext` nem de Npgsql. Como são testes
+comuns, uma violação quebra o build do CI. Não exige Docker.
+
+**Mutation testing com Stryker.NET.** O Stryker altera o código do `Domain` (troca operadores,
+constantes, condições) e confirma que algum teste falha a cada alteração. Um mutante que
+sobrevive indica uma regra sem teste que a proteja. A ferramenta é `dotnet-stryker` 4.16.0,
+fixada em `.config/dotnet-tools.json`. O limite está em `stryker-config.json`: score abaixo de
+80% reprova o comando (`break`).
+
+Score medido no Domain: **99,33%** (2 mutantes sobreviventes aceitos, que só diferem no ruído da 28ª
+casa decimal do `DecimalMath`). A medição de partida, antes dos testes acrescentados para os
+mutantes sobreviventes, deu 82,76%. Mutante equivalente (que não muda o comportamento) só é
+desabilitado com um comentário `// Stryker disable once <Mutador> : <motivo>`, uma exceção
+justificada no próprio código.
+
+Rode **sempre de dentro de `tests/FixedIncome.Domain.Tests`**, onde está o `stryker-config.json`:
+
+```bash
+dotnet tool restore
+cd tests/FixedIncome.Domain.Tests
+dotnet stryker
+```
+
+Da raiz do repositório o Stryker entra no modo solution, mutando todos os projetos e rodando os
+testes com Docker: passa de 10 minutos. De `tests/` ou de `src/FixedIncome.Domain` ele falha
+sem dizer onde rodar. Dentro de `tests/FixedIncome.Domain.Tests` leva cerca de 2 minutos.
+
+O relatório HTML e o JSON ficam em `tests/FixedIncome.Domain.Tests/StrykerOutput/<data>/reports/`.
+O Stryker restaura e compila o projeto de testes sozinho, e não precisa de Docker. Cada execução
+cria uma pasta nova com cerca de 2,3 MB; a pasta `StrykerOutput/` é ignorada pelo Git e pelo
+`docker build`, e pode ser apagada a qualquer momento:
+
+```bash
+rm -rf tests/FixedIncome.Domain.Tests/StrykerOutput
+```
+
+O workflow `.github/workflows/mutation.yml` roda o mesmo comando toda segunda-feira às 06:00 UTC
+(03:00 em Brasília), e também pode ser disparado à mão pela aba Actions (`workflow_dispatch`).
+O agendamento só vale depois que o arquivo estiver na branch `main`: o GitHub ignora `schedule` em
+outras branches, e até o merge só a execução manual funciona.
+Ele não roda a cada push: uma queda de score aparece na execução semanal, não no push que a
+causou. O relatório é publicado como artefato `stryker-report`, retido por 30 dias, mesmo quando
+o score fica abaixo do limite.
 
 ## Processo
 
@@ -502,4 +586,5 @@ ponta. Os defeitos encontrados foram corrigidos antes de seguir.
 
 ## Stack
 
-.NET 8 · ASP.NET Core · Entity Framework Core 8 · PostgreSQL 16 · xUnit · Docker
+.NET 8 · ASP.NET Core · Entity Framework Core 8 · PostgreSQL 16 · xUnit · Testcontainers ·
+NetArchTest · Stryker.NET · Docker

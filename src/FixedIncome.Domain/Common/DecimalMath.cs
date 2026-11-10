@@ -18,6 +18,7 @@ public static class DecimalMath
             throw new DomainException("A base da potência deve ser positiva.");
         }
 
+        // Stryker disable once Logical,Block : atalho de otimização; Pow(x, 0) e Pow(1, y) seguem pelo caminho geral (IntegerPow ou exp(y * ln 1) = exp(0)) e também dão exatamente 1m
         if (exponent == 0 || x == 1)
         {
             return 1m;
@@ -51,6 +52,7 @@ public static class DecimalMath
                 result *= square;
             }
 
+            // Stryker disable once Assignment : o Stryker gera <<= e >>>=. O >>>= é equivalente, pois n é long não negativo (Math.Abs) e para valor não negativo >>= e >>>= são idênticos. O <<= só é silenciado por efeito colateral do disable once (que cobre a linha toda) e é morto pelos testes sem o disable (confirmado na medição: Potencia_de_expoente_inteiro_negativo_e_o_inverso, Potencia_com_base_fora_do_intervalo_de_reducao_devolve_a_raiz_exata e os de Position): n nunca zera, o quadrado cresce até estourar o decimal e a potência lança DomainException
             n >>= 1;
             if (n > 0)
             {
@@ -58,6 +60,7 @@ public static class DecimalMath
             }
         }
 
+        // Stryker disable once Equality : com expoente 0 (só chega aqui vindo de Exp, com n = 0) result é 1m e 1m / 1m = result; os dois ramos coincidem
         return exponent < 0 ? 1m / result : result;
     }
 

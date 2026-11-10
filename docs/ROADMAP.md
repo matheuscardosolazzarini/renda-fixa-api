@@ -139,7 +139,7 @@ O QA exploratório (`docs/QA-F8.md`) deixou 17 riscos e 3 bugs de documentação
 
 **Corrigidos na emenda:** R-01 a R-07, R-10, R-12 a R-15, R-17 e B-01 a B-03. O R-15 do smoke com o arquivo do workspace também foi corrigido, e não aceito: o bundle passou a um job próprio (`contents: read`) e o smoke aplica o artefato baixado. As correções e a evidência estão em `docs/VALIDACAO-F8.md`, na seção de correções pós-QA.
 
-Não há item pendente do QA da F8. Os três critérios de pipeline acima continuam abertos, pelo motivo já descrito no status.
+Não há item pendente do QA da F8. Os três critérios de pipeline foram fechados pelas execuções reais do `release.yml`, como diz o status da fase.
 
 ## Adiado: publicação em nuvem com Terraform
 
@@ -173,11 +173,43 @@ Comece pelo Testcontainers. É o que mais aumenta a confiança nos repositórios
 
 ### Critérios de conclusão
 
-- [ ] Os testes de integração rodam com `dotnet test`, local e no CI, sem PostgreSQL instalado na máquina
-- [ ] Violar uma regra de arquitetura de propósito quebra o build (testar uma vez e desfazer)
-- [ ] Mutation score do Domain em pelo menos 80%
-- [ ] O relatório do Stryker fica salvo como artifact do workflow
-- [ ] Nenhum teste depende da ordem de execução ou dos dados de outro teste
+- [ ] Os testes de integração rodam com `dotnet test`, local e no CI, sem PostgreSQL instalado na máquina (local atendido: 659 testes verdes com Docker; falta a execução real do `ci.yml` num PR)
+- [x] Violar uma regra de arquitetura de propósito quebra o build (testar uma vez e desfazer) (prova do P5 e reprodução independente do QA, `docs/QA-F9-parteA.md`, QA9-17)
+- [x] Mutation score do Domain em pelo menos 80% (99,33%, `docs/VALIDACAO-F9.md`)
+- [ ] O relatório do Stryker fica salvo como artifact do workflow (falta a execução manual do `mutation.yml` no GitHub, depois do merge)
+- [x] Nenhum teste depende da ordem de execução ou dos dados de outro teste (banco por teste; limitação do xUnit 2 na inversão de ordem registrada em `docs/VALIDACAO-F9.md`)
+
+Status: **implementada, aguardando PR** (659 testes, antes 591; `docs/SPEC-F9-EXECUCAO.md`, `docs/VALIDACAO-F9.md`, `docs/QA-F9.md`). Ficam abertos dois critérios que só uma execução real no GitHub prova: os testes de integração no `ci.yml` (provados no PR) e o artefato `stryker-report` (Matheus roda o `mutation.yml` manualmente depois do merge).
+
+### Riscos do QA da F9
+
+O QA exploratório (`docs/QA-F9.md` e `docs/QA-F9-parteA.md`) não achou nenhum bug. Decisão de 09/11/2026: cada risco termina corrigido ou aceito com o motivo abaixo. A evidência das correções está em `docs/VALIDACAO-F9.md`, seção "Correções pós-QA".
+
+**Corrigidos**
+
+| Risco | Correção |
+|---|---|
+| R9-04: a fixture só traduzia `DockerUnavailableException` | `PostgreSqlFixture` traduz qualquer falha ao subir o contêiner na mensagem em português, agora citando `DOCKER_HOST`, com a exceção original como `InnerException`. Dois testes novos. Conferido com um `DOCKER_HOST` malformado de verdade |
+| A-R1 e A-R2: a regra 3 só olhava o namespace dos controllers | Teste novo: nenhum tipo do Domain, da Application ou da Api depende de `DbContext`, do contexto da Infrastructure nem de Npgsql. Provado com duas violações descartáveis fora de `Controllers` (vermelho com os dois tipos nomeados; removidas, verde) |
+| A-R4: o teste de arquitetura era o último passo do `ci.yml` | Passa a rodar logo depois do build, antes de qualquer passo com Docker |
+| A-R5: commit só de testes gerava release completo | `release.yml` ganhou `paths-ignore` para `tests/**` (que inclui o `stryker-config.json`) e `.github/workflows/mutation.yml`. O `ci.yml` continua rodando no push à `main` |
+| A-R7: sem `global.json` | `global.json` fixa o SDK 8.0.100 com `rollForward: latestFeature` |
+| R9-02: `StrykerOutput/` no contexto do `docker build` | Entrou no `.dockerignore`; o README ensina a apagar a pasta |
+| R9-01: `dotnet stryker` fora do diretório certo | README diz para rodar sempre de dentro de `tests/FixedIncome.Domain.Tests` e explica o que acontece nos outros lugares |
+| A-R6 e A-R8: README sem o aviso do `schedule`, sem o SDK 8 e sem o motivo das duas imagens | README corrigido. A imagem ficou `postgres:16` nos testes (a mesma do smoke do `release.yml`) e `postgres:16-alpine` no Compose, com o motivo escrito |
+| A-R9: `ESPECIFICACAO.md` e `CLAUDE.md` discordavam sobre o `graphify-out/` | Vale o `.gitignore`: o grafo é local e não é versionado. A linha do `CLAUDE.md` foi corrigida |
+
+**Aceitos**
+
+| Risco | Motivo |
+|---|---|
+| R9-03: um Apache na porta 8080 da máquina do Matheus | Ambiente da máquina, não do projeto. O Compose sobe sem erro; `localhost` cai na API e `127.0.0.1` no Apache |
+| R9-05: a mensagem de "sem Docker" repetida por teste | Comportamento do xUnit: a fixture falha uma vez por teste da coleção. O README avisa e manda ler a primeira mensagem |
+| R9-06: duas suítes ao mesmo tempo ficam mais lentas | Rodar duas execuções da solução em paralelo na mesma máquina divide o Docker e a CPU. O teto de 60 s vale para uma execução (31 s medidos) |
+| QA9-03c: engine do Docker pausada | O Docker Desktop 29.7.2 não tem comando de pausa na CLI; o caso fica coberto pelo Docker parado de verdade (QA9-03b) |
+| QA9-09c: `dotnet stryker` sem o pacote no cache do NuGet | Exigiria limpar o cache do NuGet do Matheus. Só a metade que roda sem restaurar foi observada |
+| QA9-05b: Ctrl+C manual | Decisão do Matheus: só a morte forçada (QA9-05a) |
+| `ci.yml` rodando duas vezes por push na `main` | Já aceito na F8 (ver "Riscos do QA da F8") |
 
 ## F10 — Observabilidade, cache e eventos (opcional)
 

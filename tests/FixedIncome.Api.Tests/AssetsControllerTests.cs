@@ -1,3 +1,4 @@
+using FixedIncome.Tests.Shared;
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.Extensions.DependencyInjection;
@@ -5,7 +6,8 @@ using Microsoft.Extensions.Logging;
 
 namespace FixedIncome.Api.Tests;
 
-public class AssetsControllerTests : ApiTestBase
+[Collection("PostgreSQL")]
+public class AssetsControllerTests(PostgreSqlFixture postgres) : ApiTestBase(postgres)
 {
     // Inicializado antes do construtor da base, que chama ConfigureTestServices.
     private readonly ErrorLogProviderStub _logs = new();

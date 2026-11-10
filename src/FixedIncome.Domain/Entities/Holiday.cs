@@ -7,6 +7,7 @@ public class Holiday : BaseEntity
     public const int NameMaxLength = 120;
 
     public DateOnly Date { get; private set; }
+    // Stryker disable once String : valor inicial sempre sobrescrito pelo construtor público e, na materialização do EF, pela coluna name; não é observável
     public string Name { get; private set; } = string.Empty;
 
     public Holiday(DateOnly date, string name)

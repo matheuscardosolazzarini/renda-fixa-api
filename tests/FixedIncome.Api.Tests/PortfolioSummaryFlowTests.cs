@@ -1,9 +1,11 @@
+using FixedIncome.Tests.Shared;
 using System.Net;
 using System.Net.Http.Json;
 
 namespace FixedIncome.Api.Tests;
 
-public class PortfolioSummaryFlowTests : ApiTestBase
+[Collection("PostgreSQL")]
+public class PortfolioSummaryFlowTests(PostgreSqlFixture postgres) : ApiTestBase(postgres)
 {
     [Fact]
     public async Task Resumo_da_carteira_fecha_com_a_soma_das_projecoes_individuais()

@@ -35,7 +35,14 @@ jobs:
       - name: Build (Release)
         run: dotnet build --configuration Release --no-restore
 
-      # A execução conjunta dos quatro projetos de teste em um único `dotnet test` na
+      # Roda antes dos passos com Docker: uma violação de camada falha em segundos, sem baixar
+      # a imagem do PostgreSQL.
+      # Sem cobertura: o projeto só verifica dependências entre camadas e não tem código de
+      # produção próprio para cobrir.
+      - name: Testes de Arquitetura
+        run: dotnet test tests/FixedIncome.Architecture.Tests --configuration Release --no-build
+
+      # A execução conjunta dos cinco projetos de teste em um único `dotnet test` na
       # solution é instável: o data collector do coverlet pode não concluir o flush do
       # relatório do projeto mais rápido antes do encerramento do test host, gerando um
       # coverage.cobertura.xml vazio. Rodar sequencialmente, um projeto por vez, evita a
@@ -46,9 +53,14 @@ jobs:
       - name: Testes de Application (com cobertura)
         run: dotnet test tests/FixedIncome.Application.Tests --configuration Release --no-build --settings coverlet.runsettings --collect:"XPlat Code Coverage" --results-directory ./coverage/Application
 
+      # Usa o Docker do runner: cada assembly de teste de integração baixa a imagem postgres:16
+      # e a do Ryuk (limpeza dos contêineres do Testcontainers). Se aparecer `toomanyrequests`,
+      # é o limite de pull anônimo do Docker Hub, não falha do código.
       - name: Testes de Infrastructure (com cobertura)
         run: dotnet test tests/FixedIncome.Infrastructure.Tests --configuration Release --no-build --settings coverlet.runsettings --collect:"XPlat Code Coverage" --results-directory ./coverage/Infrastructure
 
+      # Também usa o Docker do runner (postgres:16 e Ryuk); ver o aviso sobre `toomanyrequests`
+      # no passo de Infrastructure.
       - name: Testes de Api (com cobertura)
         run: dotnet test tests/FixedIncome.Api.Tests --configuration Release --no-build --settings coverlet.runsettings --collect:"XPlat Code Coverage" --results-directory ./coverage/Api
 

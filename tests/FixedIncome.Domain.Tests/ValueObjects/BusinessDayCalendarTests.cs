@@ -443,4 +443,61 @@ public class BusinessDayCalendarTests
         // Assert
         Assert.Equal(calendar.CountBusinessDays(start, end), days.Count);
     }
+
+    [Fact]
+    public void Feriados_nulos_sao_rejeitados_com_argument_null_exception()
+    {
+        // Arrange
+        IEnumerable<Holiday>? holidays = null;
+
+        // Act
+        Action act = () => new BusinessDayCalendar(holidays!);
+
+        // Assert
+        var exception = Assert.Throws<ArgumentNullException>(act);
+        Assert.Equal("holidays", exception.ParamName);
+    }
+
+    [Fact]
+    public void Calendario_sem_feriados_informa_que_precisa_de_ao_menos_um_feriado()
+    {
+        // Arrange
+        var holidays = Array.Empty<Holiday>();
+
+        // Act
+        Action act = () => new BusinessDayCalendar(holidays);
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Contains("ao menos um feriado", exception.Message);
+    }
+
+    [Fact]
+    public void Fim_anterior_ao_inicio_informa_que_a_data_final_nao_pode_ser_anterior()
+    {
+        // Arrange
+        var calendar = BuildCalendar();
+
+        // Act
+        Action act = () => calendar.BusinessDaysBetween(new DateOnly(2026, 9, 14), new DateOnly(2026, 9, 11));
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Contains("data final não pode ser anterior à data inicial", exception.Message);
+    }
+
+    [Fact]
+    public void Intervalo_vazio_no_primeiro_dia_coberto_devolve_lista_vazia()
+    {
+        // Arrange: com start == end o intervalo [start, end) é vazio. Aqui start é o primeiro dia
+        // coberto (2020-01-01, o calendário vai de 2020 a 2030): nenhuma data anterior é consultada.
+        var calendar = BuildCalendar();
+        var start = calendar.CoverageStart;
+
+        // Act
+        var days = calendar.BusinessDaysBetween(start, start);
+
+        // Assert
+        Assert.Empty(days);
+    }
 }

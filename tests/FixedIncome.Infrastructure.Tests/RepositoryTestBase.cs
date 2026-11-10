@@ -1,21 +1,39 @@
 using FixedIncome.Domain.Entities;
 using FixedIncome.Domain.Enums;
 using FixedIncome.Infrastructure.Context;
+using FixedIncome.Tests.Shared;
 using Microsoft.EntityFrameworkCore;
 
 namespace FixedIncome.Infrastructure.Tests;
 
 public abstract class RepositoryTestBase : IDisposable
 {
+    private readonly PostgreSqlFixture _fixture;
+    private readonly string _connectionString;
+    private readonly DbContextOptions<FixedIncomeDbContext> _options;
+    private readonly List<FixedIncomeDbContext> _contexts = [];
+
+    // Contexto "padrão" do teste. Para provar persistência, grave com ele e leia com CriarContexto().
     protected FixedIncomeDbContext Context { get; }
 
-    protected RepositoryTestBase()
+    // Cria um banco próprio para o teste, copiado do modelo com as migrations aplicadas.
+    protected RepositoryTestBase(PostgreSqlFixture fixture)
     {
-        var options = new DbContextOptionsBuilder<FixedIncomeDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+        _fixture = fixture;
+        _connectionString = fixture.CreateDatabase();
+        _options = new DbContextOptionsBuilder<FixedIncomeDbContext>()
+            .UseNpgsql(_connectionString)
             .Options;
 
-        Context = new FixedIncomeDbContext(options);
+        Context = CriarContexto();
+    }
+
+    // Abre um contexto novo (sem change tracker) sobre o mesmo banco do teste.
+    protected FixedIncomeDbContext CriarContexto()
+    {
+        var context = new FixedIncomeDbContext(_options);
+        _contexts.Add(context);
+        return context;
     }
 
     protected static FixedIncomeAsset CriarTitulo(string name = "CDB Banco X")
@@ -32,7 +50,13 @@ public abstract class RepositoryTestBase : IDisposable
 
     public void Dispose()
     {
-        Context.Dispose();
+        foreach (var context in _contexts)
+        {
+            context.Dispose();
+        }
+
+        _fixture.DropDatabase(_connectionString);
+
         GC.SuppressFinalize(this);
     }
 }

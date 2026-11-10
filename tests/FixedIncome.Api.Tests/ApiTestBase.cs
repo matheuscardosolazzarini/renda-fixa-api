@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FixedIncome.Infrastructure.Context;
+using FixedIncome.Tests.Shared;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -9,50 +10,59 @@ namespace FixedIncome.Api.Tests;
 
 public abstract class ApiTestBase : IDisposable
 {
+    private readonly PostgreSqlFixture _postgres;
+    private readonly string _connectionString;
     private readonly WebApplicationFactory<Program> _factory;
     protected HttpClient Client { get; }
     protected IServiceProvider Services => _factory.Services;
 
-    protected ApiTestBase()
+    protected ApiTestBase(PostgreSqlFixture postgres)
     {
-        // O nome do banco é gerado uma única vez fora do delegate: UseInMemoryDatabase é
-        // reavaliado a cada escopo (a cada requisição HTTP), e um Guid gerado dentro dele
-        // criaria um banco novo e desconectado por requisição.
-        var databaseName = Guid.NewGuid().ToString();
+        _postgres = postgres;
 
-        _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        // Um banco por teste, copiado do modelo com as migrations aplicadas (o seed de feriados,
+        // de que o calendário das projeções depende, já vem nele). A connection string é obtida
+        // uma única vez, fora do delegate, que roda a cada escopo (a cada requisição HTTP).
+        _connectionString = postgres.CreateDatabase();
+
+        try
         {
-            builder.UseEnvironment("Development");
-
-            // O job de importação chama o Banco Central: nos testes fica desligado, para
-            // nenhum teste depender da internet.
-            builder.UseSetting("IndexRatesImport:Enabled", "false");
-
-            builder.ConfigureServices(services =>
+            _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
             {
-                var descriptor = services.SingleOrDefault(
-                    d => d.ServiceType == typeof(DbContextOptions<FixedIncomeDbContext>));
+                builder.UseEnvironment("Development");
 
-                if (descriptor is not null)
+                // O job de importação chama o Banco Central: nos testes fica desligado, para
+                // nenhum teste depender da internet.
+                builder.UseSetting("IndexRatesImport:Enabled", "false");
+
+                builder.ConfigureServices(services =>
                 {
-                    services.Remove(descriptor);
-                }
+                    var descriptor = services.SingleOrDefault(
+                        d => d.ServiceType == typeof(DbContextOptions<FixedIncomeDbContext>));
 
-                services.AddDbContext<FixedIncomeDbContext>(options =>
-                    options.UseInMemoryDatabase(databaseName));
+                    if (descriptor is not null)
+                    {
+                        services.Remove(descriptor);
+                    }
 
-                ConfigureTestServices(services);
+                    // O banco é apontado pelo descritor, não por ConnectionStrings:DefaultConnection:
+                    // o Program lê a variável de ambiente antes da configuração, e uma variável
+                    // definida na máquina ou no runner venceria o teste.
+                    services.AddDbContext<FixedIncomeDbContext>(options =>
+                        options.UseNpgsql(_connectionString));
+
+                    ConfigureTestServices(services);
+                });
             });
-        });
 
-        // O InMemory não aplica migrations: EnsureCreated cria o esquema e grava o seed (HasData)
-        // dos feriados, de que o calendário das projeções depende.
-        using (var scope = _factory.Services.CreateScope())
-        {
-            scope.ServiceProvider.GetRequiredService<FixedIncomeDbContext>().Database.EnsureCreated();
+            Client = _factory.CreateClient();
         }
-
-        Client = _factory.CreateClient();
+        catch
+        {
+            // O construtor falhou depois de criar o banco: o Dispose não roda, então derruba o banco aqui.
+            _postgres.DropDatabase(_connectionString);
+            throw;
+        }
     }
 
     // Ponto de extensão para os testes que precisam substituir um caso de uso por um dublê
@@ -72,6 +82,7 @@ public abstract class ApiTestBase : IDisposable
     {
         Client.Dispose();
         _factory.Dispose();
+        _postgres.DropDatabase(_connectionString);
         GC.SuppressFinalize(this);
     }
 }

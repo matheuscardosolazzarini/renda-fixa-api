@@ -168,4 +168,46 @@ public class MarketDataTests
         // Assert
         Assert.Throws<DomainException>(act);
     }
+
+    [Fact]
+    public void Calendario_nulo_e_rejeitado_com_argument_null_exception()
+    {
+        // Arrange
+        BusinessDayCalendar? calendar = null;
+
+        // Act
+        Action act = () => new MarketData(calendar!, []);
+
+        // Assert
+        var exception = Assert.Throws<ArgumentNullException>(act);
+        Assert.Equal("calendar", exception.ParamName);
+    }
+
+    [Fact]
+    public void Cotacoes_nulas_sao_rejeitadas_com_argument_null_exception()
+    {
+        // Arrange
+        IEnumerable<IndexRate>? rates = null;
+
+        // Act
+        Action act = () => new MarketData(Calendar, rates!);
+
+        // Assert
+        var exception = Assert.Throws<ArgumentNullException>(act);
+        Assert.Equal("rates", exception.ParamName);
+    }
+
+    [Fact]
+    public void Cotacao_duplicada_informa_o_indexador_e_a_data_repetidos()
+    {
+        // Arrange
+        var rates = new[] { Cdi("2026-09-14", 0.055m), Cdi("2026-09-14", 0.056m) };
+
+        // Act
+        Action act = () => new MarketData(Calendar, rates);
+
+        // Assert
+        var exception = Assert.Throws<DomainException>(act);
+        Assert.Contains("Cotação duplicada de Cdi para 2026-09-14", exception.Message);
+    }
 }

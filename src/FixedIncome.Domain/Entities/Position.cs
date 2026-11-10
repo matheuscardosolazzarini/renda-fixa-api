@@ -31,6 +31,7 @@ public class Position : BaseEntity
 
         if (investedAmount >= InvestedAmountLimit)
         {
+            // Stryker disable once String : InvestedAmountLimit tem escala 0 (10_000_000_000_000_000m), então ToString("0") e ToString("") (formato geral) produzem o mesmo texto
             throw new DomainException(
                 $"InvestedAmount deve ser menor que {InvestedAmountLimit.ToString("0", CultureInfo.InvariantCulture)}.");
         }
@@ -71,6 +72,7 @@ public class Position : BaseEntity
         }
 
         // RN-02: a data de referência é limitada ao vencimento do título.
+        // Stryker disable once Equality : com referenceDate == MaturityDate os dois ramos resultam na mesma data
         var calculationDate = referenceDate > asset.MaturityDate ? asset.MaturityDate : referenceDate;
 
         // Dias corridos são a base de IR e IOF; dias úteis (RN-08) são a base da rentabilidade.
@@ -100,6 +102,7 @@ public class Position : BaseEntity
         var iofAmount = 0m;
         var taxAmount = 0m;
 
+        // Stryker disable once Equality : com grossYield == 0 o ramo executado dá iofAmount = 0.00m e taxAmount = 0.00m, numericamente iguais aos 0m iniciais; só a escala difere
         if (grossYield > 0)
         {
             iofAmount = Round2(grossYield * iofRate / 100);
@@ -167,6 +170,7 @@ public class Position : BaseEntity
 
                 // Mês anterior ao último publicado e sem cotação é buraco na série importada, não
                 // variação ainda não divulgada: estimar esconderia a falha (como a RN-09 faz com o CDI).
+                // Stryker disable once Equality : o mês do último IPCA publicado tem cotação, então GetIpca nunca devolve nulo para ele e month.Key == lastPublished.Month não chega a esta comparação
                 if (month.Key < lastPublished.Month)
                 {
                     throw new DomainException($"Cotação de IPCA ausente para {month.Key:yyyy-MM}.");

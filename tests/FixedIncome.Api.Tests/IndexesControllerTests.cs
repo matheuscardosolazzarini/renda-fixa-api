@@ -1,3 +1,4 @@
+using FixedIncome.Tests.Shared;
 using System.Net;
 using FixedIncome.Domain.Entities;
 using FixedIncome.Domain.Enums;
@@ -6,7 +7,8 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace FixedIncome.Api.Tests;
 
-public class IndexesControllerTests : ApiTestBase
+[Collection("PostgreSQL")]
+public class IndexesControllerTests(PostgreSqlFixture postgres) : ApiTestBase(postgres)
 {
     [Fact]
     public async Task Periodo_com_cotacoes_retorna_200_somente_com_as_datas_do_intervalo()

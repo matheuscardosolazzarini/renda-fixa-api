@@ -1,10 +1,12 @@
+using FixedIncome.Tests.Shared;
 using FixedIncome.Infrastructure.Jobs;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
 namespace FixedIncome.Api.Tests;
 
-public class IndexRatesImportJobDisabledInTestsTests : ApiTestBase
+[Collection("PostgreSQL")]
+public class IndexRatesImportJobDisabledInTestsTests(PostgreSqlFixture postgres) : ApiTestBase(postgres)
 {
     [Fact]
     public void Fabrica_de_testes_sobe_sem_o_job_de_importacao_registrado()
