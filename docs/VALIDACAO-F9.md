@@ -428,3 +428,16 @@ Conferência completa depois das correções:
 - Api.Tests e Infrastructure.Tests em 19 s cada, abaixo do teto de 60 s.
 - `actionlint` 1.7.7 e `zizmor` 1.14.2 (`--offline --persona=pedantic`): sem achados nos três workflows.
 - `dotnet stryker` em `tests/FixedIncome.Domain.Tests`: **99,33%**, exit 0 (igual ao anterior).
+
+## Execuções no GitHub
+
+Fecham os dois critérios que a validação local deixou abertos. Conferido pela API pública do GitHub em 10/11/2026: o CI do PR passou em todos os passos (arquitetura logo após o build, Infrastructure e Api contra o PostgreSQL do Testcontainers); CI e Release da main verdes no merge 699aa29; o mutation.yml publicou o artefato stryker-report.
+
+| Critério do ROADMAP | Execução | Resultado |
+|---|---|---|
+| Testes de integração no CI (critério 1, lado do CI) | PR #11, [`ci.yml` 42725508992](https://github.com/matheuscardosolazzarini/renda-fixa-api/actions/runs/42725508992) | Verde, com os testes de Infrastructure e Api contra o PostgreSQL do Testcontainers no runner |
+| O mesmo, depois do merge | Merge `699aa29` na `main` | CI e Release verdes |
+| Relatório do Stryker como artifact (critério 4) | [`mutation.yml` manual, 42727252936](https://github.com/matheuscardosolazzarini/renda-fixa-api/actions/runs/42727252936) | Artefato `stryker-report` publicado |
+
+Com elas, os cinco critérios da seção F9 do ROADMAP estão marcados e a fase está concluída (PR #11, merge
+`699aa29`, 659 testes).
