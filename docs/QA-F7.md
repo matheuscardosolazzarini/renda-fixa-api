@@ -854,3 +854,81 @@ Total: **558 testes**, `dotnet build` com 0 avisos. **O que sobra descoberto em 
 `false` de `while (await timer.WaitForNextTickAsync(...))` em `IndexRatesImportJob` (só ocorre se o timer for
 descartado, o que o código nunca faz; não é testável sem alterar o código). O `FixedIncomeDbContextFactory` (fábrica de
 design-time do `dotnet ef`) continua sem execução nos testes e entra na conta de linha.
+
+## R-01 ao vivo (fechamento da pendência), 09/11/2026
+
+Executado no commit `e9c93ca` (branch `f7-r01-ao-vivo`, working tree limpo), entre 01h00 e 01h01 UTC de 10/11, ou seja, 22h00 de 09/11 em
+Brasília: dentro da janela 21h-24h, com as duas datas diferentes (UTC 2026-11-10, Brasília 2026-11-09).
+
+**Ambiente (descartável):** contêiner `qa-r01-db` (`postgres:16-alpine`, `--rm`, sem volume nomeado, porta 55432 só no loopback, banco `qar01`).
+Migrations aplicadas com `dotnet ef database update`: `index_rate` com **0 linhas** (conferido por `count(*)` antes e depois das chamadas) e 139 feriados
+(semeados pela migration). API do working tree via `dotnet run --no-launch-profile` na porta 5190, `IndexRatesImport__Enabled=false`; o log de
+inicialização confirma "Importação de cotações desligada" e a tabela continuou vazia até o fim. O `fixedincome-db` e o `fixedincome-api` do
+desenvolvedor não foram tocados.
+
+```
+POST /api/assets      {"name":"QA-R01-LIVE","issuer":"QA-Banco","assetType":"Cdb","indexType":"PreFixed","rate":12,"issueDate":"2026-01-01","maturityDate":"2030-12-31"}
+-> 201, id f20551e2-ea89-4459-ac0d-f33180bda720
+POST /api/positions   {"assetId":"f20551e2-...","investedAmount":1000,"applicationDate":"2026-10-28"}
+-> 201, id 95c7d888-4325-4c17-807d-39478de37beb
+```
+
+| Chamada | Hora | elapsedDays | businessDays | grossAmount | iofRate | netAmount |
+|---|---|---|---|---|---|---|
+| `GET /api/positions/{id}/projection` (sem data) | 01:00:11Z UTC / 22:00:12 Brasília | **12** | 7 | **1003.15** | 60 | 1000.98 |
+| mesma, `referenceDate=2026-11-09` (Brasília) | idem | 12 | 7 | 1003.15 | 60 | 1000.98 |
+| mesma, `referenceDate=2026-11-10` (UTC) | idem | 13 | 8 | 1003.60 | 56 | 1001.22 |
+| `GET /api/portfolio/summary` (sem data) | 01:00:12Z UTC / 22:00:12 Brasília | - | - | **totalGrossAmount 1003.15** | totalIofAmount 1.89 | totalNetAmount 1000.98 |
+| mesma, `referenceDate=2026-11-09` (Brasília) | idem | - | - | 1003.15 | 1.89 | 1000.98 |
+| mesma, `referenceDate=2026-11-10` (UTC) | idem | - | - | 1003.60 | 2.02 | 1001.22 |
+
+Todas as respostas foram 200. **Resultado: OK.** A projeção e o resumo sem `referenceDate` bateram, valor a valor, com a data explícita de Brasília
+(2026-11-09) e divergiram da data UTC (2026-11-10), que daria um dia a mais de rendimento (R$ 1003,60 contra R$ 1003,15) e uma faixa de IOF
+abaixo (56% contra 60%). É o oposto do que o QA de 31/10 mostrou com o código anterior (`elapsedDays 3` às 22h37 de Brasília, data UTC); a correção
+(`BrasiliaTimeProvider` + `GetLocalNow()` nos dois casos de uso) fecha o R-01 também fora do teste de unidade.
+
+**Limpeza (primeira execução):** API encerrada (porta 5190 sem listener); contêiner `qa-r01-db` parado e removido pelo `--rm`, junto com o volume anônimo e todos os dados
+(título e posição `QA-R01-LIVE` incluídos). Permanecem apenas `fixedincome-api` e `fixedincome-db`, e `git status` ficou limpo antes desta edição.
+
+### Repetição com a imagem do Dockerfile (host em UTC)
+
+Mesmo roteiro, mesmo commit (`e9c93ca`), entre 01h35:03 e 01h35:06 UTC de 10/11 (22h35 de 09/11 em Brasília), para separar o `BrasiliaTimeProvider` do
+fuso do host (a máquina da primeira execução tem o Windows em Brasília, então o resultado dela sozinho não distinguia as duas coisas).
+
+**Ambiente (descartável):** imagem `qa-r01-api:test` construída com `docker build .` (Dockerfile da raiz, sem alteração), contêiner `qa-r01-api`
+(`--rm`, `127.0.0.1:5190->8080`) e banco `qa-r01-db` (`postgres:16-alpine`, `--rm`) na rede própria `qa-r01-net`. A API usa
+`ConnectionStrings__DefaultConnection=Host=qa-r01-db;...`, `IndexRatesImport__Enabled=false` e `ASPNETCORE_ENVIRONMENT=Development`. Migrations aplicadas
+com `dotnet ef` pelo host (porta 55432 no loopback). Antes das chamadas: `index_rate` com 0 linhas e 139 feriados; depois: 0 linhas. O log da API
+confirma "Importação de cotações desligada".
+
+```
+$ docker exec qa-r01-api date
+Tue Nov 10 01:34:54 UTC 2026
+$ docker exec qa-r01-api date -u
+Tue Nov 10 01:34:54 UTC 2026
+$ docker exec qa-r01-api sh -c 'echo "TZ=[$TZ]"; ls -l /etc/localtime'
+TZ=[]
+lrwxrwxrwx 1 root root 27 Oct 27 00:00 /etc/localtime -> /usr/share/zoneinfo/Etc/UTC
+```
+
+O contêiner está em UTC (`date` igual a `date -u`, `TZ` vazio, `/etc/localtime` aponta para `Etc/UTC`) e a imagem traz o tzdata (`/usr/share/zoneinfo`
+existe). Título `QA-R01-LIVE-UTC` (CDB PreFixed 12%) e posição de R$ 1.000 com aporte em 2026-10-28.
+
+| Chamada | Hora (relógio do contêiner) | elapsedDays | businessDays | grossAmount | iofRate | netAmount |
+|---|---|---|---|---|---|---|
+| `GET /api/positions/{id}/projection` (sem data) | 01:35:04Z UTC / 22:35:04 Brasília | **12** | 7 | **1003.15** | 60 | 1000.98 |
+| mesma, `referenceDate=2026-11-09` (Brasília) | idem | 12 | 7 | 1003.15 | 60 | 1000.98 |
+| mesma, `referenceDate=2026-11-10` (UTC) | idem | 13 | 8 | 1003.60 | 56 | 1001.22 |
+| `GET /api/portfolio/summary` (sem data) | 01:35:05Z UTC / 22:35:05 Brasília | - | - | **totalGrossAmount 1003.15** | totalIofAmount 1.89 | totalNetAmount 1000.98 |
+| mesma, `referenceDate=2026-11-09` (Brasília) | idem | - | - | 1003.15 | 1.89 | 1000.98 |
+| mesma, `referenceDate=2026-11-10` (UTC) | idem | - | - | 1003.60 | 2.02 | 1001.22 |
+
+Todas as respostas foram 200. **Resultado: OK.** Com o host em UTC, a projeção e o resumo sem `referenceDate` continuam batendo valor a valor com a data
+de Brasília (2026-11-09) e divergindo da data UTC (2026-11-10). Os números são idênticos aos da execução no host Windows. Como o fuso local do
+contêiner é UTC, um `GetLocalNow()` sem o `BrasiliaTimeProvider` daria 2026-11-10; quem levou a 2026-11-09 foi o `BrasiliaTimeProvider`. A pendência
+fica fechada em host UTC e em host com fuso de Brasília.
+
+**Limpeza (repetição em contêiner):** contêineres `qa-r01-api` e `qa-r01-db` parados e removidos pelo `--rm` (com o volume anônimo e todos os dados, título
+e posição incluídos), rede `qa-r01-net` removida e imagem `qa-r01-api:test` apagada. Sobraram apenas `fixedincome-api` e `fixedincome-db`, as mesmas
+redes e imagens de antes e o mesmo número de volumes (3). Portas 5190 e 55432 sem listener. As camadas de cache do build (`docker build`) são de imagens
+base que já existiam na máquina e não foram podadas.
