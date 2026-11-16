@@ -94,7 +94,7 @@ Achados da revisão do PR #2, nenhum bloqueante. Os dois primeiros entram na F8,
 
 ## Manutenção
 
-- [ ] **Calendário ANBIMA só até 2030.** A partir de 2031 a importação de CDI falha (data fora da cobertura) e projeções com data posterior devolvem 400. Estender o seed com os feriados publicados pela ANBIMA (planilha até 2078) antes do fim de 2030, de preferência já até 2050.
+- [x] **Calendário ANBIMA só até 2030.** A partir de 2031 a importação de CDI falha (data fora da cobertura) e projeções com data posterior devolvem 400. Estender o seed com os feriados publicados pela ANBIMA (planilha até 2078) antes do fim de 2030, de preferência já até 2050. Feito em 12/11/2026: o seed cobre 2020 a 2050 (399 datas, 260 novas), inseridas pela migration nova `ExtendAnbimaHolidaysTo2050`, com a `AddHolidaysAndIndexRates` intacta. As datas foram geradas por algoritmo (Páscoa gregoriana de Meeus/Jones/Butcher, com fixos e móveis), e o mesmo gerador reproduz exatamente as 139 datas de 2020 a 2030 já semeadas (`AnbimaHolidaySeedAlgorithmTests`). O `especialista-renda-fixa` conferiu as 13 datas de cada ano de 2031 a 2050 nas páginas anuais `fer_nacionais/AAAA.asp` da ANBIMA e conferiu Páscoa, Carnaval, Paixão e Corpus Christi de 2035, 2038, 2043, 2044 e 2049 contra a tabela de Páscoa do US Census. A planilha `feriados_nacionais.xls` continuou ilegível. Novos testes de contagem por ano, de datas de referência, de dias úteis (2035: 249; 2038: 251; 2043: 249; 2044: 251), de projeção em 2035 (200) e após 2050 (400 citando 2020-01-01 a 2050-12-31), e de importação de CDI em 2035 sem erro de cobertura. Total: 683 testes verdes, antes 659.
 
 ## F8 — Entrega contínua da imagem e pendências da F7
 
@@ -239,4 +239,8 @@ Uma tarefa só está concluída quando passa nos sete pontos abaixo, além dos c
 
 ## Próximo passo
 
-Rodar `/executar-fase F8` no Claude Code, na branch `f8-entrega-continua`, com o escopo de "F8 — Entrega contínua da imagem e pendências da F7".
+O núcleo da v2 está entregue: F7, F8 e F9 concluídas, com as pendências herdadas da F7 resolvidas e o calendário ANBIMA estendido até 2050 (seção "Manutenção"). As opções seguintes são independentes entre si:
+
+- **F10 — Observabilidade, cache e eventos (opcional).** Continua valendo o critério de entrar só se as vagas pedirem. Como a nuvem está adiada, o Application Insights não tem onde rodar: antes de começar, trocar o destino da telemetria por algo que rode local (um coletor OpenTelemetry com visualizador em contêiner no Compose) e reescrever o primeiro e o segundo critérios de conclusão da F10 para esse destino. A troca entra como item de "Decisões em aberto" da `ESPECIFICACAO.md` e precisa estar fechada antes de rodar `/executar-fase F10`.
+- **Teste de segurança.** Avaliar a API rodando, do lado de fora, além das auditorias de workflow (`actionlint` e `zizmor`) que já existem.
+- **Publicação em nuvem (adiada).** Volta quando houver destino sem custo ou orçamento. O ponto de partida é a seção "Adiado: publicação em nuvem com Terraform" e o `docs/RASCUNHO-IAC-AZURE.md`.

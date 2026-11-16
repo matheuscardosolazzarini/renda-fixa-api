@@ -82,7 +82,7 @@ ligada por padrão; nos testes da API fica desligada, para nenhum teste depender
 ### Dias úteis
 
 Dia útil é de segunda a sexta, exceto feriados nacionais da ANBIMA, cadastrados de 2020 a
-2030. A base é de 252 dias úteis por ano. Na contagem entre duas datas, a inicial entra e a
+2050. A base é de 252 dias úteis por ano. Na contagem entre duas datas, a inicial entra e a
 final fica de fora: aplicação numa sexta com referência na segunda seguinte conta um dia
 útil. Uma data fora do calendário cadastrado gera erro, nunca uma suposição.
 

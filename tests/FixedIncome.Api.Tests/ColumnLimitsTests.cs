@@ -143,7 +143,7 @@ public class ColumnLimitsTests(PostgreSqlFixture postgres) : ApiTestBase(postgre
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         using var json = await ReadJsonAsync(response);
         Assert.Equal(
-            "Data de aporte 2019-06-03 fora do período coberto pelo calendário (2020-01-01 a 2030-12-31).",
+            "Data de aporte 2019-06-03 fora do período coberto pelo calendário (2020-01-01 a 2050-12-31).",
             json.RootElement.GetProperty("message").GetString());
     }
 }
