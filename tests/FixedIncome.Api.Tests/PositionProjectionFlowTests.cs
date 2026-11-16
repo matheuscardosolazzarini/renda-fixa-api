@@ -103,4 +103,62 @@ public class PositionProjectionFlowTests(PostgreSqlFixture postgres) : ApiTestBa
         Assert.Equal(1_004.93m, data.GetProperty("grossAmount").GetDecimal());
         Assert.Equal(1_002.67m, data.GetProperty("netAmount").GetDecimal());
     }
+
+    // O seed de feriados vai até 2050: a projeção de um título longo com referência em 2035 não pode
+    // mais cair na mensagem de fora do período coberto.
+    [Fact]
+    public async Task Projecao_com_data_de_referencia_em_2035_retorna_200()
+    {
+        // Arrange
+        var positionId = await CriarTituloEAporteAsync(maturityDate: "2040-01-01", applicationDate: "2026-10-01");
+
+        // Act
+        var response = await Client.GetAsync($"/api/positions/{positionId}/projection?referenceDate=2035-06-01");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = await ReadJsonAsync(response);
+        Assert.Equal(3165, json.RootElement.GetProperty("data").GetProperty("elapsedDays").GetInt32());
+    }
+
+    // O vencimento é depois de 2050 de propósito: a data de cálculo é limitada ao vencimento (RN-02),
+    // então um título que vence dentro da cobertura nunca consulta o calendário na data de 2051.
+    [Fact]
+    public async Task Projecao_com_data_de_referencia_apos_2050_retorna_400_com_o_periodo_coberto()
+    {
+        // Arrange
+        var positionId = await CriarTituloEAporteAsync(maturityDate: "2060-01-01", applicationDate: "2026-10-01");
+
+        // Act
+        var response = await Client.GetAsync($"/api/positions/{positionId}/projection?referenceDate=2051-06-01");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var json = await ReadJsonAsync(response);
+        Assert.Equal(
+            "Data 2051-06-01 fora do período coberto pelo calendário (2020-01-01 a 2050-12-31).",
+            json.RootElement.GetProperty("message").GetString());
+    }
+
+    private async Task<Guid> CriarTituloEAporteAsync(string maturityDate, string applicationDate)
+    {
+        var assetResponse = await Client.PostAsJsonAsync("/api/assets", new
+        {
+            name = "CDB Longo",
+            issuer = "Banco X",
+            assetType = "Cdb",
+            indexType = "PreFixed",
+            rate = 10,
+            issueDate = "2025-01-01",
+            maturityDate
+        });
+        using var assetJson = await ReadJsonAsync(assetResponse);
+        var assetId = assetJson.RootElement.GetProperty("data").GetProperty("id").GetGuid();
+
+        var positionResponse = await Client.PostAsJsonAsync(
+            "/api/positions", new { assetId, investedAmount = 1000, applicationDate });
+        using var positionJson = await ReadJsonAsync(positionResponse);
+
+        return positionJson.RootElement.GetProperty("data").GetProperty("id").GetGuid();
+    }
 }

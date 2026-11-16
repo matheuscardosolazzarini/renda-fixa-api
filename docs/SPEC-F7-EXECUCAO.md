@@ -190,7 +190,7 @@ checagem vale para `start` e para `end` menos um dia, já que o fim é exclusivo
 informa o período coberto (por exemplo, "data anterior à cobertura do calendário,
 2020-01-01").
 
-O seed cobre 2020 a 2030. Estender o calendário é manutenção prevista: basta acrescentar os
+O seed cobre 2020 a 2030 (estendido até 2050 em 12/11/2026 pela migration `ExtendAnbimaHolidaysTo2050`, depois desta fase). Estender o calendário é manutenção prevista: basta acrescentar os
 feriados publicados pela ANBIMA.
 
 ### P2 — Tabela de IOF (Sonnet)

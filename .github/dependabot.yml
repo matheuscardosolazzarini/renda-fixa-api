@@ -4,10 +4,20 @@
 # não vira dependência esquecida.
 version: 2
 updates:
+  # Um PR só por semana com todas as ações: upload-artifact e download-artifact precisam subir
+  # juntos, e PRs separados que mexem nos mesmos workflows conflitam entre si.
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: weekly
+    # Só propõe versão publicada há pelo menos 7 dias: dá tempo de uma versão comprometida ser
+    # retirada antes de chegar aqui. Atualizações de segurança não esperam o cooldown.
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns:
+          - "*"
 
   # Cobre as imagens base do Dockerfile (sdk:8.0 e aspnet:8.0). A imagem postgres do service
   # container do release.yml não é lida pelo Dependabot e se atualiza à mão.
@@ -15,3 +25,12 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
+    # O projeto fica no .NET 8 (LTS, global.json e TargetFramework net8.0). Trocar de versão
+    # major é decisão de projeto, não atualização de rotina; patches e digests do 8.0 continuam.
+    ignore:
+      - dependency-name: "dotnet/sdk"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "dotnet/aspnet"
+        update-types: ["version-update:semver-major"]

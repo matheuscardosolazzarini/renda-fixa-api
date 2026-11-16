@@ -8,7 +8,7 @@ namespace FixedIncome.Infrastructure.Tests.Repositories;
 public class HolidayRepositoryTests(PostgreSqlFixture fixture) : RepositoryTestBase(fixture)
 {
     [Fact]
-    public async Task Migrations_aplicadas_materializam_os_139_feriados_semeados()
+    public async Task Migrations_aplicadas_materializam_os_399_feriados_semeados()
     {
         // Arrange
         // O seed vem das migrations aplicadas no modelo do qual o banco do teste foi copiado.
@@ -18,7 +18,7 @@ public class HolidayRepositoryTests(PostgreSqlFixture fixture) : RepositoryTestB
         var quantidade = await contexto.Holidays.CountAsync();
 
         // Assert
-        Assert.Equal(139, quantidade);
+        Assert.Equal(399, quantidade);
     }
 
     [Fact]
@@ -32,9 +32,9 @@ public class HolidayRepositoryTests(PostgreSqlFixture fixture) : RepositoryTestB
         var datas = (await repository.GetAllAsync()).Select(h => h.Date).ToList();
 
         // Assert
-        Assert.Equal(139, datas.Count);
+        Assert.Equal(399, datas.Count);
         Assert.Equal(new DateOnly(2020, 1, 1), datas.First());
-        Assert.Equal(new DateOnly(2030, 12, 25), datas.Last());
+        Assert.Equal(new DateOnly(2050, 12, 25), datas.Last());
         Assert.Equal(datas.OrderBy(d => d).ToList(), datas);
     }
 
@@ -52,6 +52,7 @@ public class HolidayRepositoryTests(PostgreSqlFixture fixture) : RepositoryTestB
         Assert.Equal(12, datas.Count(d => d.Year == 2023));
         Assert.Equal(13, datas.Count(d => d.Year == 2024));
         Assert.Equal(13, datas.Count(d => d.Year == 2030));
+        Assert.Equal(13, datas.Count(d => d.Year == 2050));
     }
 
     [Fact]
@@ -82,6 +83,6 @@ public class HolidayRepositoryTests(PostgreSqlFixture fixture) : RepositoryTestB
         // Assert
         var confraternizacao2020 = holidays.Single(h => h.Date == new DateOnly(2020, 1, 1));
         Assert.Equal(new Guid("20200101-0000-0000-0000-000000000000"), confraternizacao2020.Id);
-        Assert.Equal(139, holidays.Select(h => h.Id).Distinct().Count());
+        Assert.Equal(399, holidays.Select(h => h.Id).Distinct().Count());
     }
 }

@@ -22,6 +22,11 @@ public class AnbimaHolidaySeedBusinessDaysTests(PostgreSqlFixture fixture) : Rep
     [InlineData(2028, 248)]
     [InlineData(2029, 249)]
     [InlineData(2030, 252)]
+    // Anos de 2031 a 2050, conferidos à mão: 2035 e 2043 têm 249; 2038 e 2044, 251 (2044 é bissexto).
+    [InlineData(2035, 249)]
+    [InlineData(2038, 251)]
+    [InlineData(2043, 249)]
+    [InlineData(2044, 251)]
     public async Task Dias_uteis_do_ano_civil_batem_com_a_contagem_da_spec(int year, int expected)
     {
         // Arrange

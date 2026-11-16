@@ -178,6 +178,62 @@ public class IndexRatesImportIntegrationTests : IDisposable
     }
 
     [Fact]
+    public async Task Execucao_incremental_do_cdi_em_2035_pula_o_carnaval_do_seed_estendido_ate_o_proximo_dia_util()
+    {
+        // Arrange
+        // Última cotação gravada: sexta 02/02/2035. Segunda 05/02 e terça 06/02 são Carnaval (Páscoa em
+        // 25/03/2035), então o próximo dia útil é quarta 07/02. "Hoje" é quinta 08/02/2035, em Brasília.
+        await SeedAsync(new IndexRate(IndexType.Cdi, new DateOnly(2035, 2, 2), 0.055133m));
+        var stub = new SgsHandlerStub(
+            cdi: [("02/02/2035", "0.055133"), ("07/02/2035", "0.055134"), ("08/02/2035", "0.055135")],
+            ipca: []);
+
+        // Act
+        var response = await CreateUseCase(stub, new DateTimeOffset(2035, 2, 8, 15, 0, 0, TimeSpan.Zero)).ExecuteAsync();
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.Equal(2, response.Data!.CdiImported);
+        Assert.Contains(
+            "/dados/serie/bcdata.sgs.12/dados?formato=json&dataInicial=07/02/2035&dataFinal=08/02/2035",
+            stub.RequestedPaths);
+        Assert.Equal(
+            new[]
+            {
+                (new DateOnly(2035, 2, 2), 0.055133m),
+                (new DateOnly(2035, 2, 7), 0.055134m),
+                (new DateOnly(2035, 2, 8), 0.055135m),
+            },
+            await ReadRatesAsync(IndexType.Cdi));
+    }
+
+    [Fact]
+    public async Task Cotacao_de_cdi_no_carnaval_de_2035_e_descartada_e_a_importacao_nao_falha_por_cobertura()
+    {
+        // Arrange
+        // Primeira execução com "hoje" em 08/02/2035: o calendário real do banco precisa cobrir 2035.
+        // 05/02 e 06/02/2035 são Carnaval (feriado do seed estendido) e 03/02 é sábado.
+        var stub = new SgsHandlerStub(
+            cdi: [("02/02/2035", "0.055133"), ("03/02/2035", "0.055140"), ("05/02/2035", "0.055141"), ("06/02/2035", "0.055142"), ("07/02/2035", "0.055134")],
+            ipca: []);
+
+        // Act
+        var response = await CreateUseCase(stub, new DateTimeOffset(2035, 2, 8, 15, 0, 0, TimeSpan.Zero)).ExecuteAsync();
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.Equal(2, response.Data!.CdiImported);
+        Assert.Equal(3, response.Data.CdiDiscarded);
+        Assert.Equal(
+            new[]
+            {
+                (new DateOnly(2035, 2, 2), 0.055133m),
+                (new DateOnly(2035, 2, 7), 0.055134m),
+            },
+            await ReadRatesAsync(IndexType.Cdi));
+    }
+
+    [Fact]
     public async Task Ipca_ja_importado_ate_o_mes_corrente_nao_e_buscado_de_novo()
     {
         // Arrange
@@ -280,7 +336,7 @@ public class IndexRatesImportIntegrationTests : IDisposable
     }
 
     // Caso de uso real sobre um contexto só dele, diferente dos usados para gravar e ler no teste.
-    private ImportIndexRatesUseCase CreateUseCase(SgsHandlerStub stub)
+    private ImportIndexRatesUseCase CreateUseCase(SgsHandlerStub stub, DateTimeOffset? utcNow = null)
     {
         var context = NewContext();
         var client = new HttpClient(stub) { BaseAddress = SgsIndexRateProvider.BaseAddress };
@@ -290,7 +346,7 @@ public class IndexRatesImportIntegrationTests : IDisposable
             new SgsIndexRateProvider(client, NullLogger<SgsIndexRateProvider>.Instance),
             new IndexRateRepository(context),
             new HolidayRepository(context),
-            new FixedTimeProvider(UtcNow),
+            new FixedTimeProvider(utcNow ?? UtcNow),
             NullLogger<ImportIndexRatesUseCase>.Instance);
     }
 
