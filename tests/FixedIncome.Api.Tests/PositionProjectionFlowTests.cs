@@ -140,6 +140,69 @@ public class PositionProjectionFlowTests(PostgreSqlFixture postgres) : ApiTestBa
             json.RootElement.GetProperty("message").GetString());
     }
 
+    [Fact]
+    public async Task Projecao_com_data_informada_devolve_a_data_de_referencia_e_a_data_do_aporte_no_formato_iso()
+    {
+        // Arrange
+        var positionId = await CriarTituloEAporteAsync(maturityDate: "2027-01-01", applicationDate: "2025-04-01");
+
+        // Act
+        var response = await Client.GetAsync($"/api/positions/{positionId}/projection?referenceDate=2025-04-22");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = await ReadJsonAsync(response);
+        var data = json.RootElement.GetProperty("data");
+        Assert.Equal("2025-04-22", data.GetProperty("referenceDate").GetString());
+        Assert.Equal("2025-04-01", data.GetProperty("applicationDate").GetString());
+    }
+
+    [Fact]
+    public async Task Projecao_sem_data_com_cdi_gravado_devolve_a_data_padrao_como_data_de_referencia()
+    {
+        // Arrange: CDI até quinta, 2025-04-17; a data padrão é terça, 2025-04-22.
+        using (var scope = Services.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<FixedIncomeDbContext>();
+            context.IndexRates.Add(new IndexRate(IndexType.Cdi, new DateOnly(2025, 4, 17), 0.05m));
+            await context.SaveChangesAsync();
+        }
+
+        var positionId = await CriarTituloEAporteAsync(maturityDate: "2027-01-01", applicationDate: "2025-04-01");
+
+        // Act
+        var response = await Client.GetAsync($"/api/positions/{positionId}/projection");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = await ReadJsonAsync(response);
+        var data = json.RootElement.GetProperty("data");
+        Assert.Equal("2025-04-22", data.GetProperty("referenceDate").GetString());
+        Assert.Equal("2025-04-01", data.GetProperty("applicationDate").GetString());
+    }
+
+    [Fact]
+    public async Task Projecao_mantem_os_campos_antigos_com_os_mesmos_nomes_e_acrescenta_so_as_duas_datas()
+    {
+        // Arrange
+        var positionId = await CriarTituloEAporteAsync(maturityDate: "2027-01-01", applicationDate: "2025-04-01");
+
+        // Act
+        var response = await Client.GetAsync($"/api/positions/{positionId}/projection?referenceDate=2025-04-22");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = await ReadJsonAsync(response);
+        var names = json.RootElement.GetProperty("data").EnumerateObject().Select(p => p.Name).ToHashSet();
+        var expected = new[]
+        {
+            "positionId", "assetId", "investedAmount", "grossAmount", "grossYield", "taxRate", "taxAmount",
+            "netAmount", "elapsedDays", "businessDays", "iofRate", "iofAmount", "isEstimated",
+            "referenceDate", "applicationDate"
+        };
+        Assert.True(names.SetEquals(expected), $"Propriedades de data: {string.Join(", ", names)}");
+    }
+
     private async Task<Guid> CriarTituloEAporteAsync(string maturityDate, string applicationDate)
     {
         var assetResponse = await Client.PostAsJsonAsync("/api/assets", new

@@ -80,7 +80,8 @@ public class GetPositionProjectionUseCase : IGetPositionProjectionUseCase
             var market = await _marketDataLoader.LoadAsync(position.ApplicationDate, date);
             var projection = position.Project(asset, date, market);
 
-            var response = PositionProjectionResponse.FromProjection(position.Id, asset.Id, projection);
+            var response = PositionProjectionResponse.FromProjection(
+                position.Id, asset.Id, projection, date, position.ApplicationDate);
 
             return ApiResponse<PositionProjectionResponse>.Ok(response);
         }
