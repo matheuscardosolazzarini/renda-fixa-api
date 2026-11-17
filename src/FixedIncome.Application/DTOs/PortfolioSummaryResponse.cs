@@ -11,9 +11,14 @@ public record PortfolioSummaryResponse(
     decimal TotalIofAmount,
     decimal TotalNetAmount,
     int PositionCount,
-    IReadOnlyList<PortfolioSummaryResponse.AssetTypeSummaryResponse> ByAssetType)
+    IReadOnlyList<PortfolioSummaryResponse.AssetTypeSummaryResponse> ByAssetType,
+    DateOnly ReferenceDate,
+    IReadOnlyList<PortfolioSummaryResponse.PortfolioPositionResponse> Positions)
 {
-    public static PortfolioSummaryResponse FromSummary(PortfolioSummary summary) => new(
+    public static PortfolioSummaryResponse FromSummary(
+        PortfolioSummary summary,
+        DateOnly referenceDate,
+        IReadOnlyList<PortfolioPositionResponse> positions) => new(
         summary.TotalInvestedAmount,
         summary.TotalGrossAmount,
         summary.TotalGrossYield,
@@ -21,7 +26,12 @@ public record PortfolioSummaryResponse(
         summary.TotalIofAmount,
         summary.TotalNetAmount,
         summary.PositionCount,
-        summary.ByAssetType.Select(AssetTypeSummaryResponse.FromSummary).ToList());
+        summary.ByAssetType.Select(AssetTypeSummaryResponse.FromSummary).ToList(),
+        referenceDate,
+        positions);
+
+    // Item por composição: a projeção e o título são os mesmos DTOs dos endpoints próprios.
+    public record PortfolioPositionResponse(PositionProjectionResponse Projection, AssetResponse Asset);
 
     public record AssetTypeSummaryResponse(
         AssetType AssetType,

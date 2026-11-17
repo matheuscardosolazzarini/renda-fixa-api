@@ -15,10 +15,16 @@ public record PositionProjectionResponse(
     int BusinessDays,
     decimal IofRate,
     decimal IofAmount,
-    bool IsEstimated)
+    bool IsEstimated,
+    DateOnly ReferenceDate,
+    DateOnly ApplicationDate)
 {
     public static PositionProjectionResponse FromProjection(
-        Guid positionId, Guid assetId, PositionProjection projection) => new(
+        Guid positionId,
+        Guid assetId,
+        PositionProjection projection,
+        DateOnly referenceDate,
+        DateOnly applicationDate) => new(
         positionId,
         assetId,
         projection.InvestedAmount,
@@ -31,5 +37,7 @@ public record PositionProjectionResponse(
         projection.BusinessDays,
         projection.IofRate,
         projection.IofAmount,
-        projection.IsEstimated);
+        projection.IsEstimated,
+        referenceDate,
+        applicationDate);
 }

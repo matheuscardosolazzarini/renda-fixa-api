@@ -130,7 +130,9 @@ os valores já arredondados de cada projeção individual, não arredondando a s
 valores brutos. Um total que não fecha com as parcelas exibidas é lido como erro do
 sistema, ainda que a soma sem arredondamento intermediário seja matematicamente mais
 precisa. `TotalNetAmount` é sempre igual a `TotalGrossAmount` menos `TotalTaxAmount` menos
-`TotalIofAmount` (v2), e igual à soma dos `NetAmount` individuais.
+`TotalIofAmount` (v2), e igual à soma dos `NetAmount` individuais. Os totais são a soma dos
+itens de `positions` do resumo, e a soma é exata porque totais e itens saem da mesma lista de
+projeções, sem recálculo.
 
 **RN-08 — Dias úteis** (v2). Dia útil é qualquer dia de segunda a sexta que não seja feriado
 nacional cadastrado em `Holiday`. A contagem entre duas datas inclui a inicial e exclui a
@@ -200,6 +202,11 @@ A projeção retorna valor investido, valor bruto, rendimento, alíquota aplicad
 devido e valor líquido. Na v2, retorna também alíquota e valor de IOF, e indica se a projeção
 é estimada (RN-10).
 
+A projeção devolve também `referenceDate`, a data pedida (a informada ou a padrão resolvida,
+descrita abaixo), e `applicationDate`, a data do aporte. Numa posição vencida, `referenceDate`
+continua sendo a data pedida, mas os valores são os do vencimento (RN-02): quem exibe compara
+`referenceDate` com o `maturityDate` do título para rotular a posição como vencida.
+
 Na v2, quando `referenceDate` é omitida na projeção ou no consolidado, a data usada é o dia
 útil seguinte à última cotação de CDI importada, e não a data de hoje, para a consulta padrão
 não falhar por falta da cotação de ontem. No consolidado, uma posição com aporte posterior a
@@ -208,6 +215,24 @@ informada explicitamente e sem cotação continua sendo erro (RN-09). No consoli
 informada, as posições aportadas depois dela ficam fora do resumo. A data de "hoje" usada
 quando não há nenhuma cotação de CDI é a de Brasília (`America/Sao_Paulo`). O registro de aporte
 com data fora do período coberto pelo calendário (RN-08) é rejeitado com 400.
+
+O consolidado devolve `referenceDate` na raiz, sempre presente, inclusive com a carteira vazia:
+sem data informada, a data padrão é resolvida mesmo sem posições, e se a resolução falhar por
+calendário (cotação de CDI com a tabela de feriados vazia, ou última cotação no limite da
+cobertura) a resposta é 400. Com data informada, vale a informada, ainda que todas as posições
+fiquem de fora. Devolve também `positions`: as posições incluídas no resumo, não a lista de
+aportes (com data informada, a posição aportada depois dela não aparece). Cada item tem
+`projection`, no mesmo formato do endpoint de projeção, e `asset`, no mesmo formato de
+`/api/assets`. A ordem é a do repositório, aporte mais recente primeiro, sem garantia entre
+posições do mesmo dia.
+
+No consolidado há duas datas. A `projection.referenceDate` de cada item é igual à `referenceDate`
+da raiz, exceto na posição com aporte posterior à data padrão (sem data informada), em que é a
+data do aporte. Para abrir a projeção de um item, o consumidor passa a `projection.referenceDate`
+dele: a projeção sem data dessa posição responde 400.
+
+Os totais incluem valores estimados quando algum item tem `projection.isEstimated` verdadeiro
+(RN-10). Os percentuais de `byAssetType`, arredondados um a um, podem não somar 100.
 
 A F1 previa um health check; ele só foi entregue na F8, onde o smoke test da imagem publicada
 passou a depender dele. `GET /health` é um check de liveness: responde 200 com o texto `Healthy`

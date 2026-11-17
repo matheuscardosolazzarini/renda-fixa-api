@@ -53,6 +53,7 @@ GET {{FixedIncome.Api_HostAddress}}/api/positions
 Accept: application/json
 
 ### Projeção do aporte
+# A resposta traz referenceDate (a data pedida) e applicationDate (a data do aporte).
 GET {{FixedIncome.Api_HostAddress}}/api/positions/{{createPosition.response.body.$.data.id}}/projection?referenceDate=2026-06-01
 Accept: application/json
 
@@ -60,7 +61,16 @@ Accept: application/json
 DELETE {{FixedIncome.Api_HostAddress}}/api/assets/{{createAsset.response.body.$.data.id}}
 
 ### Resumo consolidado da carteira
+# A resposta traz referenceDate na raiz e positions: as posições incluídas, cada uma com
+# projection e asset. Com data informada, a posição aportada depois dela não aparece.
 GET {{FixedIncome.Api_HostAddress}}/api/portfolio/summary?referenceDate=2026-06-01
+Accept: application/json
+
+### Resumo consolidado da carteira sem referenceDate
+# O referenceDate da resposta diz a data usada (a padrão: dia útil seguinte à última cotação
+# de CDI). Vale mesmo com a carteira vazia. A projection.referenceDate de um item pode ser
+# posterior, se o aporte for posterior a essa data.
+GET {{FixedIncome.Api_HostAddress}}/api/portfolio/summary
 Accept: application/json
 
 ### Cotações de CDI no período (data inicial incluída, final incluída na consulta)

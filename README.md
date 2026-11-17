@@ -163,6 +163,94 @@ dia 1: `from=2026-01-15` não inclui janeiro. Um período sem cotações devolve
 vazia. Data inicial posterior à final, PreFixed e indexador inexistente devolvem 400. O indexador
 vai pelo nome, sem diferenciar maiúsculas; o número do enum (`/api/indexes/1`) também devolve 400.
 
+### Projeção e resumo da carteira
+
+A projeção diz qual data de referência foi usada e a data do aporte. O exemplo é um CDB
+prefixado a 10% a.a., R$ 1.000 aplicados em 2025-04-01 e projetados em 2025-04-22. Alíquotas em
+pontos percentuais.
+
+```
+GET /api/positions/{id}/projection?referenceDate=2025-04-22
+```
+
+```json
+{
+  "statusCode": 200,
+  "success": true,
+  "message": null,
+  "data": {
+    "positionId": "7c1f0e52-3a4b-4e0d-9b8a-2d5c6f1a9e01",
+    "assetId": "b3d2a6f4-81c7-4a52-8f3e-0c9d7e4b5a12",
+    "investedAmount": 1000,
+    "grossAmount": 1004.93,
+    "grossYield": 4.93,
+    "taxRate": 22.5,
+    "taxAmount": 0.78,
+    "netAmount": 1002.67,
+    "elapsedDays": 21,
+    "businessDays": 13,
+    "iofRate": 30,
+    "iofAmount": 1.48,
+    "isEstimated": false,
+    "referenceDate": "2025-04-22",
+    "applicationDate": "2025-04-01"
+  }
+}
+```
+
+`referenceDate` é a data pedida: a informada ou, se omitida, a padrão (o dia útil seguinte à
+última cotação de CDI importada). Numa posição vencida ela continua sendo a data pedida, mas os
+valores são os do vencimento; quem exibe compara com o `maturityDate` do título.
+
+O resumo traz `referenceDate` na raiz, sempre presente, e `positions`, as posições incluídas no
+resumo, da mais recente para a mais antiga. Cada item tem a `projection` (o mesmo formato acima)
+e o `asset` (o mesmo formato de `/api/assets`). Os totais são a soma exata dos itens. O exemplo
+é a chamada sem `referenceDate`, com duas posições (um CDB e uma LCI aportada em 2025-05-05,
+depois da data padrão 2025-04-22); os trechos `…` foram omitidos aqui por brevidade.
+
+```
+GET /api/portfolio/summary
+```
+
+```json
+{
+  "statusCode": 200,
+  "success": true,
+  "message": null,
+  "data": {
+    "totalInvestedAmount": 1500,
+    "totalGrossAmount": 1504.93,
+    "totalGrossYield": 4.93,
+    "totalTaxAmount": 0.78,
+    "totalIofAmount": 1.48,
+    "totalNetAmount": 1502.67,
+    "positionCount": 2,
+    "byAssetType": [ … ],
+    "referenceDate": "2025-04-22",
+    "positions": [
+      {
+        "projection": { "positionId": "…", "assetId": "…", "investedAmount": 500, "…": "…",
+                        "referenceDate": "2025-05-05", "applicationDate": "2025-05-05" },
+        "asset": { "id": "…", "name": "LCI Banco Y", "issuer": "Banco Y", "assetType": "Lci",
+                   "indexType": "Cdi", "rate": 100, "issueDate": "…", "maturityDate": "…" }
+      },
+      {
+        "projection": { "positionId": "…", "…": "…", "referenceDate": "2025-04-22",
+                        "applicationDate": "2025-04-01" },
+        "asset": { "…": "…" }
+      }
+    ]
+  }
+}
+```
+
+A `referenceDate` da raiz é a data do resumo. A da `projection` de cada item é igual a ela,
+exceto na posição aportada depois da data padrão, que é projetada na própria data do aporte
+(rendimento zero), como a LCI acima. Para abrir a projeção de um item, passe a
+`projection.referenceDate` dele. Com `referenceDate` informada, a posição aportada depois dela
+não entra no resumo nem em `positions`. Os totais incluem valores estimados quando algum item
+tem `isEstimated: true`.
+
 ## Arquitetura
 
 ```
@@ -462,7 +550,7 @@ estão descritos em [`docs/ROADMAP.md`](docs/ROADMAP.md).
 dotnet test
 ```
 
-659 testes, executados a cada push pelo GitHub Actions.
+712 testes, executados a cada push pelo GitHub Actions.
 
 **Docker precisa estar em execução.** Os testes de repositório (`FixedIncome.Infrastructure.Tests`)
 e de ponta a ponta (`FixedIncome.Api.Tests`) rodam contra um PostgreSQL 16 real, subido pelo
@@ -482,9 +570,9 @@ dotnet test tests/FixedIncome.Architecture.Tests
 | Camada | Testes | Linha | Branch |
 |---|---|---|---|
 | Domain | 332 | 96,3% | 100% |
-| Application | 112 | 92,6% | 98,9% |
-| Infrastructure | 150 | 99,7% | 98,4% |
-| Api | 57 | 96,4% | 91,3% |
+| Application | 132 | 94,2% | 98,9% |
+| Infrastructure | 172 | 99,7% | 98,4% |
+| Api | 68 | 96,4% | 91,3% |
 | Architecture | 8 | sem cobertura | sem cobertura |
 
 O projeto `FixedIncome.Architecture.Tests` só verifica dependências entre camadas e não tem código de

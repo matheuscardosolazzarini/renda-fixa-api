@@ -391,6 +391,92 @@ public class GetPositionProjectionUseCaseTests
         Assert.Equal(1_100.00m, response.Data!.GrossAmount, precision: 2);
     }
 
+    [Fact]
+    public async Task Data_informada_e_devolvida_como_data_de_referencia_junto_com_a_data_do_aporte()
+    {
+        // Arrange
+        var asset = new FixedIncomeAsset(
+            "CDB Banco X", "Banco X", AssetType.Cdb, IndexType.PreFixed, 10m,
+            new DateOnly(2025, 1, 1), new DateOnly(2027, 1, 1));
+        var position = new Position(asset, 1_000m, new DateOnly(2025, 4, 1));
+        var useCase = CriarCaso(position, asset);
+
+        // Act
+        var response = await useCase.ExecuteAsync(position.Id, new DateOnly(2025, 4, 22));
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.Equal(new DateOnly(2025, 4, 22), response.Data!.ReferenceDate);
+        Assert.Equal(new DateOnly(2025, 4, 1), response.Data!.ApplicationDate);
+    }
+
+    [Fact]
+    public async Task Data_ausente_com_cdi_importado_devolve_o_dia_util_seguinte_a_ultima_cotacao_como_data_de_referencia()
+    {
+        // Arrange: CDI até quinta, 2025-04-17; a data padrão é terça, 2025-04-22.
+        var asset = new FixedIncomeAsset(
+            "CDB Banco X", "Banco X", AssetType.Cdb, IndexType.PreFixed, 10m,
+            new DateOnly(2025, 1, 1), new DateOnly(2027, 1, 1));
+        var position = new Position(asset, 1_000m, new DateOnly(2025, 4, 1));
+        var useCase = CriarCaso(
+            position, asset, new TimeProviderStub(Now), new IndexRate(IndexType.Cdi, new DateOnly(2025, 4, 17), 0.05m));
+
+        // Act
+        var response = await useCase.ExecuteAsync(position.Id, referenceDate: null);
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.Equal(new DateOnly(2025, 4, 22), response.Data!.ReferenceDate);
+        Assert.Equal(new DateOnly(2025, 4, 1), response.Data!.ApplicationDate);
+    }
+
+    [Fact]
+    public async Task Data_ausente_sem_cdi_devolve_a_data_de_hoje_em_brasilia_como_data_de_referencia()
+    {
+        // Arrange: 2025-04-22 às 01h UTC ainda é 2025-04-21 em Brasília (UTC-3).
+        var asset = new FixedIncomeAsset(
+            "CDB Banco X", "Banco X", AssetType.Cdb, IndexType.PreFixed, 10m,
+            new DateOnly(2025, 1, 1), new DateOnly(2027, 1, 1));
+        var position = new Position(asset, 1_000m, new DateOnly(2025, 4, 1));
+        var clock = new TimeProviderStub(new DateTimeOffset(2025, 4, 22, 1, 0, 0, TimeSpan.Zero));
+        var useCase = CriarCaso(position, asset, clock);
+
+        // Act
+        var response = await useCase.ExecuteAsync(position.Id, referenceDate: null);
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.Equal(new DateOnly(2025, 4, 21), response.Data!.ReferenceDate);
+        Assert.Equal(new DateOnly(2025, 4, 1), response.Data!.ApplicationDate);
+    }
+
+    // D-2: a data de referência posterior ao vencimento é devolvida como foi pedida, mas os valores
+    // são os do vencimento (RN-02): 21 dias corridos e 13 úteis, os mesmos do caso de 2025-04-22.
+    [Fact]
+    public async Task Data_posterior_ao_vencimento_devolve_a_data_pedida_com_os_valores_do_vencimento()
+    {
+        // Arrange
+        var asset = new FixedIncomeAsset(
+            "CDB Banco X", "Banco X", AssetType.Cdb, IndexType.PreFixed, 10m,
+            new DateOnly(2025, 1, 1), new DateOnly(2025, 4, 22));
+        var position = new Position(asset, 1_000m, new DateOnly(2025, 4, 1));
+        var useCase = CriarCaso(position, asset);
+
+        // Act
+        var response = await useCase.ExecuteAsync(position.Id, new DateOnly(2025, 5, 5));
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.Equal(new DateOnly(2025, 5, 5), response.Data!.ReferenceDate);
+        Assert.Equal(new DateOnly(2025, 4, 1), response.Data!.ApplicationDate);
+        Assert.Equal(21, response.Data!.ElapsedDays);
+        Assert.Equal(13, response.Data!.BusinessDays);
+        Assert.Equal(1_004.93m, response.Data!.GrossAmount);
+        Assert.Equal(1.48m, response.Data!.IofAmount);
+        Assert.Equal(0.78m, response.Data!.TaxAmount);
+        Assert.Equal(1_002.67m, response.Data!.NetAmount);
+    }
+
     private static GetPositionProjectionUseCase CriarCaso(
         Position? position, FixedIncomeAsset? asset, params IndexRate[] rates)
     {

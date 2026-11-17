@@ -42,7 +42,9 @@ public class GetPortfolioSummaryUseCase : IGetPortfolioSummaryUseCase
         // do laço abaixo multiplicaria o número de idas ao banco por posição.
         var assets = (await _assetRepository.GetAllAsync()).ToDictionary(asset => asset.Id);
 
-        var projections = new List<(PositionProjection Projection, AssetType AssetType)>();
+        // Lista única: posição, título, projeção e data usada. Alimenta os totais (RN-07) e os itens de
+        // Positions, para a soma dos itens fechar exatamente com os totais, sem recalcular.
+        var projected = new List<(Position Position, FixedIncomeAsset Asset, PositionProjection Projection, DateOnly Date)>();
 
         if (positions.Count > 0)
         {
@@ -66,19 +68,24 @@ public class GetPortfolioSummaryUseCase : IGetPortfolioSummaryUseCase
             }
         }
 
-        if (positions.Count > 0)
-        {
-            try
-            {
-                var defaultDate = referenceDate ?? await ResolveDefaultReferenceDateAsync();
+        // Data do resumo: a informada, ou a padrão resolvida uma única vez, inclusive com a carteira
+        // vazia (o campo nunca é nulo). Fica depois do 404 e do filtro por data, e dentro do
+        // tratamento de DomainException, para uma falha do calendário virar 400.
+        DateOnly summaryDate;
 
+        try
+        {
+            summaryDate = referenceDate ?? await ResolveDefaultReferenceDateAsync();
+
+            if (positions.Count > 0)
+            {
                 // Sem data informada, o aporte posterior à data padrão rende zero: a posição é
-                // projetada na própria data do aporte, sem exigir cotação. Com data explícita
-                // nada muda e o aporte posterior segue sendo erro de domínio.
+                // projetada na própria data do aporte, sem exigir cotação. Com data informada, o
+                // aporte posterior já foi excluído pelo filtro acima (R-02) e nunca chega aqui.
                 DateOnly DateFor(Position position) =>
-                    referenceDate is null && position.ApplicationDate > defaultDate
+                    referenceDate is null && position.ApplicationDate > summaryDate
                         ? position.ApplicationDate
-                        : defaultDate;
+                        : summaryDate;
 
                 // Um único carregamento cobre todas as posições, do aporte mais antigo à maior data.
                 var market = await _marketDataLoader.LoadAsync(
@@ -90,8 +97,9 @@ public class GetPortfolioSummaryUseCase : IGetPortfolioSummaryUseCase
 
                     try
                     {
-                        var projection = position.Project(asset, DateFor(position), market);
-                        projections.Add((projection, asset.AssetType));
+                        var date = DateFor(position);
+                        var projection = position.Project(asset, date, market);
+                        projected.Add((position, asset, projection, date));
                     }
                     // R-10: com várias posições, "Cotação de CDI ausente" sozinha não diz qual falhou,
                     // e a causa mais comum é a importação desligada ou ainda não executada. Outros
@@ -104,14 +112,23 @@ public class GetPortfolioSummaryUseCase : IGetPortfolioSummaryUseCase
                     }
                 }
             }
-            catch (DomainException ex)
-            {
-                return ApiResponse<PortfolioSummaryResponse>.BadRequest(ex.Message);
-            }
+        }
+        catch (DomainException ex)
+        {
+            return ApiResponse<PortfolioSummaryResponse>.BadRequest(ex.Message);
         }
 
-        var summary = PortfolioSummary.Create(projections);
-        var response = PortfolioSummaryResponse.FromSummary(summary);
+        var summary = PortfolioSummary.Create(projected.Select(p => (p.Projection, p.Asset.AssetType)));
+
+        // Mesma ordem do repositório (D-6) e a mesma projeção que alimentou os totais.
+        var items = projected
+            .Select(p => new PortfolioSummaryResponse.PortfolioPositionResponse(
+                PositionProjectionResponse.FromProjection(
+                    p.Position.Id, p.Asset.Id, p.Projection, p.Date, p.Position.ApplicationDate),
+                AssetResponse.FromEntity(p.Asset)))
+            .ToList();
+
+        var response = PortfolioSummaryResponse.FromSummary(summary, summaryDate, items);
 
         return ApiResponse<PortfolioSummaryResponse>.Ok(response);
     }

@@ -1,6 +1,6 @@
 # Roadmap v2 — renda-fixa-api
 
-Atualizado em 30/10/2026.
+Atualizado em 16/11/2026.
 
 ## Objetivo
 
@@ -95,6 +95,7 @@ Achados da revisão do PR #2, nenhum bloqueante. Os dois primeiros entram na F8,
 ## Manutenção
 
 - [x] **Calendário ANBIMA só até 2030.** A partir de 2031 a importação de CDI falha (data fora da cobertura) e projeções com data posterior devolvem 400. Estender o seed com os feriados publicados pela ANBIMA (planilha até 2078) antes do fim de 2030, de preferência já até 2050. Feito em 12/11/2026: o seed cobre 2020 a 2050 (399 datas, 260 novas), inseridas pela migration nova `ExtendAnbimaHolidaysTo2050`, com a `AddHolidaysAndIndexRates` intacta. As datas foram geradas por algoritmo (Páscoa gregoriana de Meeus/Jones/Butcher, com fixos e móveis), e o mesmo gerador reproduz exatamente as 139 datas de 2020 a 2030 já semeadas (`AnbimaHolidaySeedAlgorithmTests`). O `especialista-renda-fixa` conferiu as 13 datas de cada ano de 2031 a 2050 nas páginas anuais `fer_nacionais/AAAA.asp` da ANBIMA e conferiu Páscoa, Carnaval, Paixão e Corpus Christi de 2035, 2038, 2043, 2044 e 2049 contra a tabela de Páscoa do US Census. A planilha `feriados_nacionais.xls` continuou ilegível. Novos testes de contagem por ano, de datas de referência, de dias úteis (2035: 249; 2038: 251; 2043: 249; 2044: 251), de projeção em 2035 (200) e após 2050 (400 citando 2020-01-01 a 2050-12-31), e de importação de CDI em 2035 sem erro de cobertura. Total: 683 testes verdes, antes 659.
+- [x] **Contrato para o front (L-01 e L-03).** A projeção e o resumo da carteira passam a dizer qual data de referência foi usada, e o resumo passa a devolver as posições incluídas. A projeção ganha `referenceDate` (a data pedida) e `applicationDate` (a data do aporte). O resumo ganha `referenceDate` na raiz, sempre presente (inclusive com a carteira vazia, caso em que a data padrão passa a ser resolvida e uma falha de calendário responde 400), e `positions`, cada item com `projection` e `asset`, saídos da mesma lista de projeções que alimenta os totais. Só aditivo: nenhum campo existente mudou, o Domain ficou intocado, sem migration e sem pacote novo. Feito em 16/11/2026, conforme `docs/SPEC-CONTRATO-FRONT.md`. Total: 712 testes verdes, antes 683.
 
 ## F8 — Entrega contínua da imagem e pendências da F7
 
