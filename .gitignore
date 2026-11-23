@@ -501,3 +501,8 @@ efbundle
 
 # Stryker.NET
 StrykerOutput/
+
+# Terraform da F11 (infra/aws): os tfvars do ambiente não têm segredo e entram no repositório
+!infra/aws/environments/*.tfvars
+*.tfplan
+infra/aws/floci_override.tf

@@ -1,5 +1,5 @@
 ---
-description: Conduz uma fase da v2 (F7 a F10) do início ao fim, com spec revisada por especialista, testes antes do código, revisões e verificação independente.
+description: Conduz uma fase da v2 (F7 a F11) do início ao fim, com spec revisada por especialista, testes antes do código, revisões e verificação independente.
 argument-hint: F7
 ---
 
@@ -14,7 +14,7 @@ confere o que voltou e decide se a fase avança. Siga as etapas na ordem. Uma et
 | Agente | Modelo | Papel | Quando |
 |---|---|---|---|
 | `especialista-renda-fixa` | Opus | regra de mercado correta, casos de referência, auditoria de cálculo | specs e implementação com cálculo (F7, e qualquer fase que toque cálculo) |
-| `revisor-arquitetura` | Opus | camadas, convenções, escopo, qualidade dos testes | toda fase, depois da implementação; em F8 e F9, também na spec |
+| `revisor-arquitetura` | Opus | camadas, convenções, escopo, qualidade dos testes | toda fase, depois da implementação; em F8, F9 e F11, também na spec |
 | `implementador` | Sonnet (Haiku em passo mecânico) | testes primeiro, depois código, um passo por vez | cada passo e cada correção |
 | `verificador-de-fase` | Sonnet | build, testes, cobertura, smoke, critério a critério | fim da fase |
 | `qa-exploratorio` | Opus no roteiro, Sonnet na execução | uso da API como caixa-preta, bugs fora da spec | depois da verificação |
@@ -31,7 +31,8 @@ de buscar ou abrir arquivos, quando `graphify-out/graph.json` existir".
 
 1. `$ARGUMENTS` é uma fase de `docs/ROADMAP.md`.
 2. A fase anterior está com todos os critérios marcados no ROADMAP. Para a F7, a seção
-   "Antes de começar" está toda marcada.
+   "Antes de começar" está toda marcada. Para a F11, a fase anterior é a F9: a F10 é
+   opcional e não bloqueia.
 3. Nenhum item de "Decisões em aberto" em `docs/ESPECIFICACAO.md` está pendente para esta
    fase.
 4. A árvore está atualizada com o remoto (`git fetch` e `git status -sb`) e não tem
@@ -53,7 +54,7 @@ esteja neles.
 ## Etapa 2 — Revisão da spec
 
 - Fase com cálculo: `especialista-renda-fixa` em modo revisão.
-- F8 e F9: `revisor-arquitetura` revisando a spec.
+- F8, F9 e F11: `revisor-arquitetura` revisando a spec.
 
 Incorpore os achados `bloqueante` e `importante`. Os que você não incorporar, liste com o
 motivo.

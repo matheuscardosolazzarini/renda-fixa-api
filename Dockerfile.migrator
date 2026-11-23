@@ -1,0 +1,16 @@
+# Imagem de migração: carrega só o migration bundle self-contained (linux-x64) que o job `bundle`
+# do release.yml gera, o mesmo artefato que o smoke prova. O contexto de build é o diretório
+# `artifacts/` com o `efbundle` já baixado (docker build -f Dockerfile.migrator artifacts/), e não
+# a raiz do repositório: o Dockerfile da API continua sendo o alvo padrão do `docker build .`.
+# O bundle lê a conexão de ConnectionStrings__DefaultConnection (a mesma variável da API).
+FROM mcr.microsoft.com/dotnet/runtime-deps:8.0
+WORKDIR /app
+
+# O download do artefato não preserva o bit de execução; o --chmod o restaura sem duplicar o
+# arquivo (~120 MB) numa camada extra, como um RUN chmod faria.
+COPY --chmod=0755 efbundle /app/efbundle
+
+# A base runtime-deps:8.0 já traz o usuário sem privilégio `app` (UID 1654): não precisa de adduser.
+USER app
+
+ENTRYPOINT ["/app/efbundle"]

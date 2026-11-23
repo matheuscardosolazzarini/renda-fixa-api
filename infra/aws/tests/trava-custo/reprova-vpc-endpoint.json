@@ -1,0 +1,1 @@
+{"format_version":"1.2","resource_changes":[{"address":"aws_vpc_endpoint.s3","mode":"managed","type":"aws_vpc_endpoint","name":"x","change":{"actions":["create"],"after":{}}}]}
