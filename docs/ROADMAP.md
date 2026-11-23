@@ -1,10 +1,10 @@
 # Roadmap v2 — renda-fixa-api
 
-Atualizado em 16/11/2026.
+Atualizado em 19/11/2026.
 
 ## Objetivo
 
-A v1 (F1 a F6) entregou a API com taxas fixas no `appsettings.json`. A v2 dá o próximo passo: o sistema passa a usar dados de mercado reais, publica sozinho uma imagem testada e ganha testes que provam que os cálculos estão certos. A numeração continua a da v1. A ordem é F7, depois F8, depois F9. A F10 é opcional.
+A v1 (F1 a F6) entregou a API com taxas fixas no `appsettings.json`. A v2 dá o próximo passo: o sistema passa a usar dados de mercado reais, publica sozinho uma imagem testada e ganha testes que provam que os cálculos estão certos. A numeração continua a da v1. A ordem é F7, depois F8, depois F9. A F10 é opcional. A F11 (nuvem na AWS) vem depois da F9 e não depende da F10.
 
 Como usar este roadmap:
 
@@ -14,7 +14,7 @@ Como usar este roadmap:
 
 ## Como executar uma fase
 
-No Claude Code, rode `/executar-fase F7` (ou F8, F9, F10). O comando, em `.claude/commands/executar-fase.md`, coordena quatro agentes de `.claude/agents/`:
+No Claude Code, rode `/executar-fase F7` (ou F8, F9, F10, F11). O comando, em `.claude/commands/executar-fase.md`, coordena quatro agentes de `.claude/agents/`:
 
 | Agente | Papel |
 |---|---|
@@ -34,9 +34,11 @@ flowchart TD
     F8["<b>F8 · Entrega contínua da imagem</b><br/>/health, pendências da F7 e imagem testada no GHCR"]
     F9["<b>F9 · Qualidade</b><br/>Testcontainers, NetArchTest e Stryker.NET"]
     F10["<b>F10 · Observabilidade, cache, eventos</b><br/>Opcional: OpenTelemetry, Redis e outbox"]
+    F11["<b>F11 · Nuvem na AWS</b><br/>Terraform, ambiente efêmero e Floci"]
     F7 -- "CDB 100% CDI bate com a Calculadora do Cidadão (± R$ 0,01)" --> F8
     F8 -- "merge na main publica imagem testada sem passo manual" --> F9
     F9 -- "integração no CI e mutation score do Domain ≥ 80%" --> F10
+    F9 --> F11
     style F10 stroke-dasharray: 5 5
 ```
 
@@ -135,7 +137,7 @@ O QA exploratório (`docs/QA-F8.md`) deixou 17 riscos e 3 bugs de documentação
 | R-11: o bundle cria o banco quando o nome na connection string está errado | Comportamento do EF, que cria o banco ao aplicar as migrations. Documentado no README, com o aviso de conferir o nome do banco antes de rodar o bundle. |
 | R-16: o provedor recua um dia quando `from == to` | Efeito nulo: a janela recuada cai num dia sem dados. O contorno é mantido porque o 400 do SGS para `dataInicial == dataFinal` pode voltar; o comentário do provedor foi atualizado com o que o QA observou. |
 | CI rodando duas vezes por merge | Decisão da spec: mantém o badge do `ci.yml` válido e o `workflow_call`. O repositório é gratuito para Actions. |
-| R-15: as tags de candidatas se acumulam no GHCR | A limpeza fica para quando o volume de imagens importar. |
+| R-15: as tags de candidatas se acumulam no GHCR | A limpeza fica para quando o volume de imagens importar. Na F11, a imagem `-migrator` dobra o acúmulo de tags candidatas (uma por SHA); sem custo. |
 | Digest do `postgres` do smoke não é atualizado pelo Dependabot | O Dependabot não atualiza imagem de `services:` de workflow; o `docker` em `/` cobre só o Dockerfile. A troca do digest é manual e está dita em comentário no `release.yml` e no `dependabot.yml`. |
 
 **Corrigidos na emenda:** R-01 a R-07, R-10, R-12 a R-15, R-17 e B-01 a B-03. O R-15 do smoke com o arquivo do workspace também foi corrigido, e não aceito: o bundle passou a um job próprio (`contents: read`) e o smoke aplica o artefato baixado. As correções e a evidência estão em `docs/VALIDACAO-F8.md`, na seção de correções pós-QA.
@@ -143,6 +145,8 @@ O QA exploratório (`docs/QA-F8.md`) deixou 17 riscos e 3 bugs de documentação
 Não há item pendente do QA da F8. Os três critérios de pipeline foram fechados pelas execuções reais do `release.yml`, como diz o status da fase.
 
 ## Adiado: publicação em nuvem com Terraform
+
+Retomado em 19/11/2026 como **F11 — Nuvem na AWS** (ver abaixo). O texto desta seção fica como histórico da decisão sobre o Azure.
 
 Em 08/11/2026 a assinatura "Azure subscription 1" estava `Disabled` (fim do crédito de avaliação): ela aceita leitura, mas não escrita, e por isso o PostgreSQL está parado e o Container App quebrado. Não há orçamento para reativá-la. Terraform continua sendo a escolha de IaC (decisão de 02/11/2026); a fase volta quando houver um destino. Dois caminhos avaliados:
 
@@ -226,6 +230,48 @@ Entre nesta fase só se as vagas que você estiver mirando pedirem esses itens. 
 - [ ] A segunda consulta de indexador no mesmo dia não chega ao banco (conferido no trace)
 - [ ] Com o broker fora do ar, o evento não se perde: fica no outbox e é enviado quando o broker volta
 
+## F11 — Nuvem na AWS
+
+Decisão de 19/11/2026: a publicação em nuvem volta com destino na AWS, num ambiente **efêmero**. Nada que cobre por hora fica ligado fora de uma demo. Antes de existir conta, a configuração é validada no emulador Floci. O detalhamento, as decisões D1 a D6 e a revisão do `revisor-arquitetura` estão em `docs/SPEC-F11-EXECUCAO.md` (aprovada em 19/11/2026).
+
+A regra mais importante da fase é de custo: a conta fica no Free account plan e nunca recebe upgrade, e o ambiente tem prazo de validade com destruição automática, verificação de que nada sobrou, orçamento com alerta e travas que reprovam recurso caro.
+
+### Passos
+
+0. Criar a conta (cadastro "advanced", Free account plan, MFA no root) e confirmar plano, região e serviços disponíveis.
+1. Esqueleto do Terraform em `infra/aws/`, com override do Floci fora do versionamento.
+2. Rede e banco (RDS sem acesso público, senha fora do state por escrita única).
+3. Aplicação: ECS Fargate, ALB, logs e secret.
+4. Imagem de migração (`Dockerfile.migrator`) publicada pelo `release.yml` junto com a da API.
+5. Travas: verificação de zerado e trava de custo sobre o plano.
+6. Workflow `infra-aws.yml` (validar, subir, destruir, limpar e agendado) e bootstrap no CloudShell.
+7. README.
+8. Validação ao vivo com o Matheus.
+
+### Critérios de conclusão
+
+Sem conta na AWS:
+
+- [x] `fmt -check -recursive`, `validate` e `terraform test` verdes (57 runs, `VALIDACAO-F11.md`, 23/11/2026)
+- [ ] Ciclo no Floci (`apply` com `service_desired_count = 0` e `destroy`) verde no PR (provado localmente em `VALIDACAO-F11.md`; falta a execução no PR)
+- [x] A trava de custo reprova planos com NAT, Multi-AZ e `desired_count = 2` (69 casos e plano real do Floci, `VALIDACAO-F11.md`)
+- [x] A verificação de zerado reprova um ambiente com recurso sobrando e aprova um vazio (Floci: 22 achados, depois aprovada; 19 casos, `VALIDACAO-F11.md`)
+- [x] A imagem de migração aplica as migrations num PostgreSQL limpo e a API sobe em seguida (`VALIDACAO-F11.md`)
+- [x] Senha e connection string fora do state (prova local) (`VALIDACAO-F11.md`)
+- [x] Nenhum segredo, state ou `*.tfvars` com segredo no repositório (busca em 317 arquivos, `VALIDACAO-F11.md`)
+- [x] `actionlint` e `zizmor` sem achado no `infra-aws.yml` e no `release.yml` (zizmor 1.32.0 nas duas personas; no `release.yml`, `self-repository` suprimido com comentário por decisão do Matheus de 20/11/2026, `VALIDACAO-F11.md`)
+- [x] `dotnet build` sem warning e `dotnet test` verde, com 712 testes ou mais (712, `VALIDACAO-F11.md`)
+
+Ao vivo (só marcados com evidência):
+
+- [ ] `subir` publica a API pelo DNS do ALB, com smoke verde e `plan` seguinte sem diferença
+- [ ] A importação do BC termina sem erro no primeiro ciclo
+- [ ] O TTL vencido destrói tudo sem passo manual, e a verificação de zerado passa
+- [ ] `subir` cancelado é limpo pelo `limpar`; `destruir` manual termina com zerado verde
+- [ ] Nenhuma senha ou connection string nos logs do Actions
+- [ ] Custo bruto das subidas conferido no Cost Explorer e registrado
+- [ ] A conta continua no Free account plan ao fim da fase
+
 ## Definição de pronto (vale para toda tarefa)
 
 Uma tarefa só está concluída quando passa nos sete pontos abaixo, além dos critérios da fase.
@@ -244,4 +290,4 @@ O núcleo da v2 está entregue: F7, F8 e F9 concluídas, com as pendências herd
 
 - **F10 — Observabilidade, cache e eventos (opcional).** Continua valendo o critério de entrar só se as vagas pedirem. Como a nuvem está adiada, o Application Insights não tem onde rodar: antes de começar, trocar o destino da telemetria por algo que rode local (um coletor OpenTelemetry com visualizador em contêiner no Compose) e reescrever o primeiro e o segundo critérios de conclusão da F10 para esse destino. A troca entra como item de "Decisões em aberto" da `ESPECIFICACAO.md` e precisa estar fechada antes de rodar `/executar-fase F10`.
 - **Teste de segurança.** Avaliar a API rodando, do lado de fora, além das auditorias de workflow (`actionlint` e `zizmor`) que já existem.
-- **Publicação em nuvem (adiada).** Volta quando houver destino sem custo ou orçamento. O ponto de partida é a seção "Adiado: publicação em nuvem com Terraform" e o `docs/RASCUNHO-IAC-AZURE.md`.
+- **F11 — Nuvem na AWS.** Spec aprovada em 19/11/2026 (`docs/SPEC-F11-EXECUCAO.md`). Próximo passo: `/executar-fase F11`.

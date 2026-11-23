@@ -26,8 +26,9 @@ projetada para uma data, já líquida de imposto de renda.
 - Importação diária das cotações de CDI e IPCA pela API SGS do Banco Central
 - Rentabilidade de títulos Cdi e Ipca calculada sobre dias úteis, base 252
 - IOF regressivo sobre resgates com menos de 30 dias
-- Entrega contínua da imagem Docker, testada no pipeline (publicação em nuvem e infraestrutura
-  como código adiadas; ver ROADMAP)
+- Entrega contínua da imagem Docker, testada no pipeline
+- Publicação em nuvem sob demanda na AWS, com infraestrutura como código em Terraform e ambiente
+  efêmero destruído automaticamente (F11)
 - Testes de integração contra PostgreSQL real, regras de arquitetura e mutation testing
 
 ### Fora do escopo
@@ -280,7 +281,7 @@ São regras que independem de orquestração e precisam ser testáveis sem infra
 | Resiliência HTTP (v2) | Microsoft.Extensions.Http.Resilience |
 | Calendário (v2) | Feriados nacionais ANBIMA em tabela própria, carregados por seed |
 | Entrega contínua (v2) | GitHub Actions publica a imagem no GitHub Container Registry a cada merge na `main`, depois de um smoke test no próprio runner |
-| Infraestrutura como código (v2) | Terraform, adiado até existir um ambiente de publicação (decisão de 08/11/2026) |
+| Infraestrutura como código (v2) | Terraform (decisão de 02/11/2026), com destino na AWS a partir da F11 (decisão de 19/11/2026): ECS Fargate, Application Load Balancer e RDS PostgreSQL num ambiente efêmero, validado antes no emulador Floci. Conta no Free account plan, sem upgrade. Detalhes em `docs/SPEC-F11-EXECUCAO.md` |
 | Taxas fixas de indexador (v2) | Removidas: saem a seção `IndexRates` do `appsettings.json` e o `IndexRatesOptions`. Sem cotação, vale a RN-09 |
 | Testes de integração (v2) | Testcontainers com PostgreSQL 16 (`postgres:16`): um contêiner por coleção de testes; cada teste ganha um banco próprio, criado a partir de um banco-modelo com as migrations aplicadas |
 | Regras de arquitetura (v2) | NetArchTest.Rules |
@@ -344,6 +345,10 @@ Testcontainers, regras de arquitetura com NetArchTest e mutation testing no Doma
 
 **F10 — Observabilidade, cache e eventos (opcional).** OpenTelemetry, cache das cotações e
 eventos com outbox. Só entra se as vagas-alvo pedirem.
+
+**F11 — Nuvem na AWS.** Terraform de um ambiente efêmero na AWS (ECS Fargate, ALB e RDS
+PostgreSQL), validado primeiro no emulador Floci e depois subido só durante uma demo, com
+prazo de validade e destruição automática. Não depende da F10, que é opcional.
 
 Passos e critérios de cada fase da v2 estão em `docs/ROADMAP.md`. O detalhamento de execução
 fica em `docs/SPEC-Fx-EXECUCAO.md`, escrito no começo de cada fase.

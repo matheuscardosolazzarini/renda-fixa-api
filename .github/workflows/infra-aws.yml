@@ -1,0 +1,964 @@
+name: Infra AWS
+
+# F11: ambiente efêmero na AWS (ECS Fargate, ALB e RDS) descrito em infra/aws. Spec: docs/SPEC-F11-EXECUCAO.md.
+# Premissa de custo: nada fica ligado esquecido. Este arquivo concentra `subir`, `destruir`, `limpar` e o
+# `agendado` de propósito: um workflow desativado (60 dias sem atividade) também não sobe nada.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "infra/aws/**"
+      - ".github/workflows/infra-aws.yml"
+      - "README.md" # tests/readme confere o roteiro de lock preso e os caminhos dos scripts
+  workflow_dispatch:
+    inputs:
+      acao:
+        description: "O que fazer com o ambiente"
+        type: choice
+        required: true
+        options:
+          - subir
+          - destruir
+      horas:
+        description: "Só para subir: duração do ambiente em horas (inteiro de 1 a 12)"
+        type: string
+        required: false
+        default: "4"
+      sha:
+        description: "Só para subir: SHA do commit (40 hex minúsculos). Vazio = SHA da imagem latest"
+        type: string
+        required: false
+        default: ""
+  # A cada 30 min (fora do minuto 0, que é o mais disputado). Destrói o ambiente vencido e confere a conta.
+  schedule:
+    - cron: "7,37 * * * *"
+
+# Permissão mínima por padrão; cada job eleva só o que precisa.
+permissions:
+  contents: read
+
+# `bash` explícito liga o pipefail (o shell padrão do Actions não liga): um `terraform show | trava-custo.sh`
+# precisa falhar quando qualquer lado falha.
+defaults:
+  run:
+    shell: bash
+
+env:
+  IMAGE: ghcr.io/matheuscardosolazzarini/renda-fixa-api
+  # Nomes fixos pelo Terraform (infra/aws/modules/app): serviço e cluster de mesmo nome, famílias das task definitions.
+  SERVICE: renda-fixa-api
+  LOG_GROUP: /ecs/renda-fixa-api
+  MARCACAO_EXPIRES_AT: "1970-01-01T00:00:00Z"
+  MARCACAO_IMAGE_SHA: "0000000000000000000000000000000000000000"
+  TF_IN_AUTOMATION: "true"
+  AWS_PAGER: ""
+
+jobs:
+  # Sem environment, sem id-token e sem credencial da AWS: roda também em PR de fork.
+  validar:
+    name: Validar Terraform, workflow e ciclo no Floci
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    # Um push novo no mesmo PR cancela a validação anterior (nada fora do runner é tocado).
+    concurrency:
+      group: infra-aws-validar-${{ github.ref }}
+      cancel-in-progress: true
+    permissions:
+      contents: read # só ler o código do PR
+    env:
+      # Ferramentas fixadas por digest, como o postgres:16 do release.yml. Versões: Floci 2.5.0, actionlint 1.7.12,
+      # zizmor 1.32.0 e shellcheck (0.10.0). O Dependabot não atualiza estas referências: trocar o digest à mão.
+      FLOCI_IMAGE: floci/floci:2.5.0@sha256:a0fbf944d7f338cc0856f1ef83831ea749ff2be71956eb7a7fce08fc21458e19
+      ACTIONLINT_IMAGE: rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+      ZIZMOR_IMAGE: ghcr.io/zizmorcore/zizmor@sha256:3014cc8f68f663935f69b3c3e0e41f5ce102b268d97db13db0f62208747f860d
+      SHELLCHECK_IMAGE: koalaman/shellcheck@sha256:2097951f02e735b613f4a34de20c40f937a6c8f18ecb170612c88c34517221fb
+      # Credenciais fictícias e endpoint do Floci: só este job as define, e a AWS real nunca é chamada.
+      AWS_ENDPOINT_URL: http://localhost:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: us-east-1
+    defaults:
+      run:
+        shell: bash
+        working-directory: infra/aws
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # Versão exata, igual à usada nos testes locais da F11. Sem wrapper: ele reescreve a saída dos comandos.
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.17.0
+          terraform_wrapper: false
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive -diff
+
+      - name: Terraform init (sem backend)
+        run: terraform init -backend=false -input=false
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform test
+        run: terraform test
+
+      - name: Trava de custo - casos de teste
+        run: bash tests/trava-custo/rodar.sh
+
+      - name: Verificação de zerado - casos de teste (shim do aws)
+        run: bash tests/verificar-zerado/rodar.sh
+
+      - name: Bloqueio de recriação - casos de teste
+        run: bash tests/bloquear-recriacao/rodar.sh
+
+      - name: Bootstrap - policy da role do CI
+        run: bash tests/bootstrap/rodar.sh
+
+      - name: Parar migração - casos de teste (shim do aws)
+        run: bash tests/parar-migracao/rodar.sh
+
+      - name: Agendado - destroy sem a corrida com o subir (terraform e gh falsos)
+        run: bash tests/agendado/rodar.sh
+
+      # `prevent_destroy` faz o destroy abortar sem destruir nada, e nem o terraform test nem a trava o enxergam.
+      - name: Sem prevent_destroy - verificação e casos de teste
+        run: |
+          bash scripts/verificar-sem-prevent-destroy.sh
+          bash tests/lifecycle/rodar.sh
+
+      - name: Workflow - checagens estruturais (continue-on-error e destroy do agendado)
+        run: bash tests/workflow/rodar.sh
+
+      - name: README - roteiro de lock preso e caminhos dos scripts
+        run: bash tests/readme/rodar.sh
+
+      # O terraform test só enxerga as regras nomeadas; aqui o código todo: sem protocolo -1, 2 saídas da tarefa, SG padrão vazio.
+      - name: Security groups - checagens estáticas
+        run: bash tests/seguranca/rodar.sh
+
+      - name: actionlint
+        working-directory: ${{ github.workspace }}
+        run: docker run --rm --volume "$GITHUB_WORKSPACE:/repo" --workdir /repo "$ACTIONLINT_IMAGE" -color .github/workflows/infra-aws.yml
+
+      # Offline: sem token e sem chamada à API do GitHub, as auditorias que dependem de rede ficam de fora. O pedantic
+      # liga as auditorias estritas, o padrão usado na F8.
+      - name: zizmor
+        working-directory: ${{ github.workspace }}
+        run: >
+          docker run --rm --volume "$GITHUB_WORKSPACE:/repo" --workdir /repo "$ZIZMOR_IMAGE"
+          --offline --persona pedantic .github/workflows/infra-aws.yml
+
+      - name: shellcheck
+        working-directory: ${{ github.workspace }}
+        run: >
+          docker run --rm --volume "$GITHUB_WORKSPACE:/mnt" --workdir /mnt "$SHELLCHECK_IMAGE"
+          infra/aws/scripts/*.sh infra/aws/bootstrap/bootstrap.sh infra/aws/tests/trava-custo/rodar.sh
+          infra/aws/tests/verificar-zerado/rodar.sh infra/aws/tests/bloquear-recriacao/rodar.sh
+          infra/aws/tests/bootstrap/rodar.sh
+          infra/aws/tests/parar-migracao/rodar.sh infra/aws/tests/agendado/rodar.sh
+          infra/aws/tests/lifecycle/rodar.sh infra/aws/tests/workflow/rodar.sh infra/aws/tests/readme/rodar.sh
+          infra/aws/tests/seguranca/rodar.sh
+
+      # ECS e RDS do Floci rodam em contêineres filhos: precisa do socket do Docker e de root.
+      - name: Floci - subir o emulador
+        run: |
+          docker run --detach --name floci -u root --publish 4566:4566 \
+            --volume /var/run/docker.sock:/var/run/docker.sock "$FLOCI_IMAGE"
+          limite=$((SECONDS + 90))
+          until curl --silent --output /dev/null --fail --max-time 2 "$AWS_ENDPOINT_URL/"; do
+            if [ "$SECONDS" -ge "$limite" ]; then
+              echo "::error::O Floci não respondeu em 90s"
+              docker logs floci
+              exit 1
+            fi
+            sleep 1
+          done
+
+      # No ambiente real a execution role vem do bootstrap; no emulador, a CLI do runner a cria antes do apply.
+      - name: Floci - criar a execution role (substituta do bootstrap)
+        run: >
+          aws iam create-role --role-name renda-fixa-api-execution
+          --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ecs-tasks.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
+          --query Role.Arn --output text
+
+      # O override troca o backend s3 por um local e aponta o provider para o Floci (arquivo no .gitignore).
+      - name: Floci - gerar o override e reiniciar o Terraform
+        run: |
+          bash scripts/gerar-floci-override.sh "$AWS_ENDPOINT_URL"
+          terraform init -input=false -reconfigure -lock-timeout=5m
+
+      - name: Floci - plan (service_desired_count = 0)
+        run: >
+          terraform plan -input=false -lock-timeout=5m -var-file=environments/floci.tfvars
+          -var "expires_at=$(date -u -d '+2 hours' +%Y-%m-%dT%H:%M:%SZ)" -var "service_desired_count=0"
+          -out=floci.tfplan
+
+      # O JSON do plano vai direto para o script: não é impresso nem salvo (tem variáveis sensíveis).
+      - name: Floci - trava de custo sobre o plano
+        run: terraform show -json floci.tfplan | bash scripts/trava-custo.sh
+
+      - name: Floci - bloqueio de recriação sobre o plano
+        run: terraform show -json floci.tfplan | bash scripts/bloquear-recriacao.sh
+
+      # O RDS do Floci sobe um PostgreSQL de verdade e pode levar alguns minutos; o prazo evita o timeout de 50 min do provider.
+      - name: Floci - apply do plano
+        timeout-minutes: 15
+        run: terraform apply -input=false -lock-timeout=5m floci.tfplan
+
+      - name: Floci - destroy
+        timeout-minutes: 15
+        run: >
+          terraform destroy -auto-approve -input=false -lock-timeout=5m -var-file=environments/floci.tfvars
+          -var "expires_at=$(date -u -d '+2 hours' +%Y-%m-%dT%H:%M:%SZ)" -var "service_desired_count=0"
+
+      # Divergências do emulador (D1 e D2 do P5), não da configuração, e só no Floci: nenhum job da AWS real faz isto.
+      #  D1: o Floci deixa um log group /aws/rds/instance/renda-fixa-api*/... depois do destroy da instância.
+      #  D2: o Floci mantém a tag project de um serviço ECS já apagado.
+      # O log group do ECS (/ecs/...) e qualquer outro resíduo NÃO são tocados: continuam reprovando a verificação.
+      # A tag só é removida de um serviço que o ECS confirma inexistente: ClusterNotFoundException, failures[].reason
+      # MISSING ou status INACTIVE. Qualquer outro erro, ou resposta que não confirma nada, falha o passo.
+      - name: "Floci: remover artefatos que o emulador não apaga"
+        run: |
+          grupos="$(aws logs describe-log-groups --output json \
+            | jq -r '.logGroups[].logGroupName | select(startswith("/aws/rds/instance/renda-fixa-api"))')"
+          while IFS= read -r grupo; do
+            if [ -n "$grupo" ]; then
+              aws logs delete-log-group --log-group-name "$grupo"
+              echo "Floci D1: log group removido: $grupo"
+            fi
+          done <<< "$grupos"
+
+          servicos="$(aws resourcegroupstaggingapi get-resources --tag-filters Key=project,Values=renda-fixa-api --output json \
+            | jq -r '.ResourceTagMappingList[].ResourceARN | select(test("^arn:aws:ecs:[^:]*:[^:]*:service/"))')"
+          while IFS= read -r arn; do
+            if [ -z "$arn" ]; then
+              continue
+            fi
+            cluster="$(cut -d/ -f2 <<< "$arn")"
+            if resposta="$(aws ecs describe-services --cluster "$cluster" --services "$arn" --output json 2> "$RUNNER_TEMP/describe-services.err")"; then
+              # apagado = INACTIVE ou MISSING; existe = qualquer outro status; desconhecido = a resposta não diz nada.
+              situacao="$(jq -r 'if ((.failures // []) | map(.reason) | index("MISSING")) != null then "apagado"
+                elif ((.services // []) | length) == 0 then "desconhecido"
+                elif .services[0].status == "INACTIVE" then "apagado"
+                elif (.services[0].status // "") != "" then "existe"
+                else "desconhecido" end' <<< "$resposta")"
+            elif grep -q 'ClusterNotFoundException' "$RUNNER_TEMP/describe-services.err"; then
+              situacao="apagado" # o cluster já foi destruído, e o serviço com ele
+            else
+              echo "::error::describe-services falhou por um motivo que não confirma a exclusão do serviço $arn"
+              head -n 5 "$RUNNER_TEMP/describe-services.err"
+              exit 1
+            fi
+            if [ "$situacao" = "desconhecido" ]; then
+              echo "::error::describe-services não confirmou o estado do serviço $arn"
+              exit 1
+            fi
+            if [ "$situacao" = "apagado" ]; then
+              aws ecs untag-resource --resource-arn "$arn" --tag-keys project
+              echo "Floci D2: tag project removida do serviço apagado: $arn"
+            else
+              echo "Floci D2: serviço ainda existe, a tag fica: $arn"
+            fi
+          done <<< "$servicos"
+
+      - name: Floci - verificação de zerado
+        run: bash scripts/verificar-zerado.sh
+
+      - name: Floci - logs do emulador (em caso de falha)
+        if: failure()
+        working-directory: ${{ github.workspace }}
+        run: docker logs --tail 200 floci || echo "contêiner floci não foi criado"
+
+      - name: Floci - remover contêineres
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: |
+          docker ps --all --quiet --filter "name=floci" | xargs --no-run-if-empty docker rm --force
+
+  # Sobe o ambiente. Ordem obrigatória da D3: apply com 0 tarefas, migração, apply com 1 tarefa, espera, smoke.
+  subir:
+    name: Subir o ambiente
+    # AWS_ROLE_ARN é variable de REPOSITÓRIO de propósito: o `if` do job é avaliado antes de o job entrar no
+    # environment, e variables do environment `aws` não são resolvidas aqui (ver o relatório do P6).
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.acao == 'subir' &&
+      github.ref == 'refs/heads/main' && vars.AWS_ROLE_ARN != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    environment: aws
+    concurrency:
+      group: infra-aws-manual
+      cancel-in-progress: false
+    permissions:
+      contents: read # ler o código
+      id-token: write # trocar o token OIDC do GitHub por credencial temporária da AWS
+    outputs:
+      # Vira true logo antes do primeiro comando que pode criar algo: é o que autoriza o `limpar` a destruir.
+      iniciou: ${{ steps.iniciar.outputs.iniciou }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: infra/aws
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # Entradas e contextos chegam ao shell só por env, nunca interpolados no script.
+      - name: Validar entradas
+        id: entradas
+        env:
+          HORAS: ${{ inputs.horas }}
+          SHA_ENTRADA: ${{ inputs.sha }}
+        run: |
+          if [[ ! "$HORAS" =~ ^[0-9]{1,2}$ ]] || (( 10#$HORAS < 1 || 10#$HORAS > 12 )); then
+            echo "::error::horas deve ser um inteiro de 1 a 12"
+            exit 1
+          fi
+          if [[ -n "$SHA_ENTRADA" && ! "$SHA_ENTRADA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::sha deve ter exatamente 40 hexadecimais minúsculos"
+            exit 1
+          fi
+          echo "horas=$((10#$HORAS))" >> "$GITHUB_OUTPUT"
+
+      # O agendado só roda enquanto o repositório tiver atividade: sem commit por 60 dias o GitHub o desativa
+      # (repositório público). Um ambiente de 12 h subido no dia 59 poderia perder o destroy automático.
+      - name: Guarda de 45 dias sem commit
+        run: |
+          ultimo="$(git log -1 --format=%ct)"
+          dias=$(( ($(date +%s) - ultimo) / 86400 ))
+          if (( dias >= 45 )); then
+            echo "::error::O último commit da main tem $dias dias (limite 45). Faça um commit antes de subir: o GitHub desativa workflows agendados após 60 dias sem atividade."
+            exit 1
+          fi
+          echo "Último commit da main: $dias dia(s)."
+
+      # Sem a entrada `sha`, usa o SHA da `latest`, lido do rótulo revision da própria imagem. O jq procura o rótulo
+      # em qualquer lugar do JSON: serve para manifesto simples (config.Labels) e para lista de manifestos
+      # (um mapa plataforma -> config), e só aceita se todos os candidatos concordarem.
+      - name: Resolver o SHA da imagem
+        id: sha
+        env:
+          SHA_ENTRADA: ${{ inputs.sha }}
+        run: |
+          sha="$SHA_ENTRADA"
+          if [ -z "$sha" ]; then
+            sha="$(docker buildx imagetools inspect "$IMAGE:latest" --format '{{json .Image}}' \
+              | jq -r '[.. | objects | select(has("org.opencontainers.image.revision")) | ."org.opencontainers.image.revision"] | unique | if length == 1 then .[0] else "" end')"
+          fi
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Não foi possível resolver um SHA válido (40 hexadecimais) para a imagem"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "SHA da imagem: $sha"
+
+      # Sem login e com token anônimo de pull: prova de uma vez que as duas tags existem e que o pacote é público
+      # (o ECS puxa do GHCR sem credencial). Roda antes de qualquer comando da AWS.
+      - name: Conferir as imagens no GHCR (sem login)
+        env:
+          SHA: ${{ steps.sha.outputs.sha }}
+        run: |
+          repositorio="${IMAGE#ghcr.io/}"
+          token="$(curl --silent --show-error --fail --max-time 20 --retry 3 \
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:${repositorio}:pull" | jq -r '.token // empty')"
+          if [ -z "$token" ]; then
+            echo "::error::O GHCR não devolveu o token anônimo de pull"
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          aceitos="application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json"
+          for tag in "$SHA" "$SHA-migrator"; do
+            codigo="$(curl --silent --output /dev/null --write-out '%{http_code}' --head --max-time 20 --retry 3 \
+              --header "Authorization: Bearer $token" --header "Accept: $aceitos" \
+              "https://ghcr.io/v2/${repositorio}/manifests/${tag}" || true)"
+            if [ "$codigo" != "200" ]; then
+              echo "::error::A tag $tag não está disponível sem login no GHCR (HTTP $codigo): não existe ou o pacote não é público. As imagens anteriores à F11 não têm -migrator: é preciso um merge com o release.yml novo."
+              exit 1
+            fi
+            echo "Tag $tag encontrada no GHCR."
+          done
+
+      - name: Credencial da AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-duration-seconds: 7200
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.17.0
+          terraform_wrapper: false
+
+      - name: Terraform init
+        env:
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: >
+          terraform init -input=false -lock-timeout=5m
+          -backend-config=environments/aws.backend.hcl -backend-config="bucket=$TF_STATE_BUCKET"
+
+      # Dois prazos. O definitivo (agora + horas, até 12 h) é calculado uma vez e só entra no apply da fase 1 e no
+      # plano final. A fase 0 usa um provisório curto (agora + 1 h, ou o definitivo se for menor): se o `subir`
+      # morrer entre as fases e o `limpar` também falhar, o agendado destrói o ambiente em até 1 h e não só no TTL
+      # inteiro. Trocar o prazo entre as fases é só um update in-place da tag do cluster e do output (provado no Floci).
+      - name: Calcular expires_at
+        id: prazo
+        env:
+          HORAS: ${{ steps.entradas.outputs.horas }}
+        run: |
+          definitivo="$(date -u -d "+${HORAS} hours" +%s)"
+          provisorio="$(date -u -d "+1 hour" +%s)"
+          if (( provisorio > definitivo )); then
+            provisorio="$definitivo"
+          fi
+          {
+            echo "expires_at=$(date -u -d "@$definitivo" +%Y-%m-%dT%H:%M:%SZ)"
+            echo "expires_at_provisorio=$(date -u -d "@$provisorio" +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "$GITHUB_OUTPUT"
+
+      # A partir daqui qualquer falha ou cancelamento pode deixar recurso na conta: o job `limpar` passa a valer.
+      - name: Marcar o início das alterações
+        id: iniciar
+        run: echo "iniciou=true" >> "$GITHUB_OUTPUT"
+
+      # Fase 0: tudo menos a tarefa da API, com o prazo PROVISÓRIO (ver "Calcular expires_at"). O plano salvo tem
+      # variáveis sensíveis: fica só neste job e nunca vira artifact.
+      - name: Plan (service_desired_count = 0)
+        env:
+          SHA: ${{ steps.sha.outputs.sha }}
+          EXPIRES_AT: ${{ steps.prazo.outputs.expires_at_provisorio }}
+        run: >
+          terraform plan -input=false -lock-timeout=5m -var-file=environments/aws.tfvars
+          -var "region=$AWS_REGION" -var "expires_at=$EXPIRES_AT" -var "image_sha=$SHA"
+          -var "service_desired_count=0" -out=fase0.tfplan
+
+      # O JSON do plano vai direto do terraform para o script: não é salvo nem impresso.
+      - name: Trava de custo (fase 0)
+        run: terraform show -json fase0.tfplan | bash scripts/trava-custo.sh
+
+      # Recriar o RDS ou a versão do secret dessincroniza a senha (escrita única): reprova antes do apply. O `limpar`
+      # destrói o ambiente depois desta falha; o `subir` seguinte começa do zero.
+      - name: Bloquear recriação do banco e do secret (fase 0)
+        run: terraform show -json fase0.tfplan | bash scripts/bloquear-recriacao.sh
+
+      - name: Apply (service_desired_count = 0)
+        run: terraform apply -input=false -lock-timeout=5m fase0.tfplan
+
+      - name: Ler as saídas do Terraform
+        id: saidas
+        run: |
+          {
+            echo "cluster=$(terraform output -raw cluster_name)"
+            echo "subnets=$(terraform output -json public_subnet_ids | jq -r 'join(",")')"
+            echo "sg=$(terraform output -raw task_security_group_id)"
+            echo "alb=$(terraform output -raw alb_dns_name)"
+          } >> "$GITHUB_OUTPUT"
+
+      # Migração: tarefa avulsa da família renda-fixa-migrator, no mesmo SG da API, com IP público para puxar a imagem.
+      - name: Migração - iniciar a tarefa
+        id: migracao
+        env:
+          CLUSTER: ${{ steps.saidas.outputs.cluster }}
+          SUBNETS: ${{ steps.saidas.outputs.subnets }}
+          SG: ${{ steps.saidas.outputs.sg }}
+        run: |
+          resposta="$(aws ecs run-task --cluster "$CLUSTER" --task-definition renda-fixa-migrator --launch-type FARGATE \
+            --count 1 --propagate-tags TASK_DEFINITION --started-by "infra-aws-$GITHUB_RUN_ID" \
+            --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=ENABLED}" \
+            --output json)"
+          # Grava o ARN antes de qualquer outra checagem: o passo de parada (if: always) depende dele.
+          tarefa="$(jq -r '.tasks[0].taskArn // empty' <<< "$resposta")"
+          if [ -n "$tarefa" ]; then
+            echo "task_arn=$tarefa" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$(jq '(.failures | length) > 0' <<< "$resposta")" = "true" ]; then
+            echo "::error::run-task devolveu falhas: $(jq -c '.failures' <<< "$resposta")"
+            exit 1
+          fi
+          if [ -z "$tarefa" ]; then
+            echo "::error::run-task não iniciou nenhuma tarefa"
+            exit 1
+          fi
+          echo "Tarefa de migração iniciada: $tarefa"
+
+      # Prazo de 10 min medido pelo relógio do shell. O `aws ecs wait tasks-stopped` desiste sozinho (100 tentativas
+      # de 6 s, saída 255) e não mostra o motivo; aqui o prazo é explícito e o diagnóstico vem junto.
+      - name: Migração - esperar o fim e exigir exitCode 0
+        env:
+          CLUSTER: ${{ steps.saidas.outputs.cluster }}
+          TAREFA: ${{ steps.migracao.outputs.task_arn }}
+        run: |
+          limite=$((SECONDS + 600))
+          descricao=""
+          while :; do
+            if descricao="$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TAREFA" --output json)"; then
+              if [ "$(jq -r '.tasks[0].lastStatus // "DESCONHECIDO"' <<< "$descricao")" = "STOPPED" ]; then
+                break
+              fi
+            fi
+            if [ "$SECONDS" -ge "$limite" ]; then
+              echo "::error::A migração não terminou em 10 minutos"
+              exit 1
+            fi
+            sleep 10
+          done
+          codigo="$(jq -r '[.tasks[0].containers[] | select(.name == "migrator") | .exitCode] | .[0] // "nulo"' <<< "$descricao")"
+          if [ "$codigo" != "0" ]; then
+            echo "::error::A migração falhou (exitCode $codigo)"
+            echo "stopCode:      $(jq -r '.tasks[0].stopCode // "-"' <<< "$descricao")"
+            echo "stoppedReason: $(jq -r '.tasks[0].stoppedReason // "-"' <<< "$descricao")"
+            echo "container:     $(jq -r '[.tasks[0].containers[] | select(.name == "migrator") | .reason] | .[0] // "-"' <<< "$descricao")"
+            id_tarefa="${TAREFA##*/}"
+            aws logs tail "$LOG_GROUP" --log-stream-name-prefix "migrator/migrator/$id_tarefa" --since 30m || true
+            exit 1
+          fi
+          echo "Migração concluída com exitCode 0."
+
+      # Roda mesmo com falha ou cancelamento: uma tarefa solta fica fora do state e custa por hora.
+      - name: Migração - parar a tarefa
+        if: always() && steps.migracao.outputs.task_arn != ''
+        env:
+          CLUSTER: ${{ steps.saidas.outputs.cluster }}
+          TAREFA: ${{ steps.migracao.outputs.task_arn }}
+        run: >
+          aws ecs stop-task --cluster "$CLUSTER" --task "$TAREFA" --reason "infra-aws: fim do passo de migração"
+          > /dev/null || echo "::warning::stop-task não concluiu (a tarefa já deve ter parado)"
+
+      # Fase 1: sobe a API, agora com o prazo DEFINITIVO (a tag do cluster e o output mudam in-place; nada é recriado).
+      # As migrations já estão aplicadas, então a importação de índices da partida encontra as tabelas.
+      - name: Plan (service_desired_count = 1)
+        env:
+          SHA: ${{ steps.sha.outputs.sha }}
+          EXPIRES_AT: ${{ steps.prazo.outputs.expires_at }}
+        run: >
+          terraform plan -input=false -lock-timeout=5m -var-file=environments/aws.tfvars
+          -var "region=$AWS_REGION" -var "expires_at=$EXPIRES_AT" -var "image_sha=$SHA"
+          -var "service_desired_count=1" -out=fase1.tfplan
+
+      - name: Trava de custo (fase 1)
+        run: terraform show -json fase1.tfplan | bash scripts/trava-custo.sh
+
+      - name: Bloquear recriação do banco e do secret (fase 1)
+        run: terraform show -json fase1.tfplan | bash scripts/bloquear-recriacao.sh
+
+      - name: Apply (service_desired_count = 1)
+        run: terraform apply -input=false -lock-timeout=5m fase1.tfplan
+
+      # Prazo de 15 min medido pelo shell: serviço com um só deployment concluído, tarefas no número desejado
+      # e pelo menos um alvo healthy no target group. Rollout FAILED (circuit breaker) falha na hora.
+      - name: Esperar o serviço estável e o alvo healthy
+        env:
+          CLUSTER: ${{ steps.saidas.outputs.cluster }}
+        run: |
+          limite=$((SECONDS + 900))
+          estavel=false
+          while :; do
+            if servico="$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" --output json)"; then
+              rollout="$(jq -r '.services[0].deployments[0].rolloutState // "-"' <<< "$servico")"
+              if [ "$rollout" = "FAILED" ]; then
+                echo "::error::O deployment falhou (circuit breaker do ECS)"
+                break
+              fi
+              if [ "$(jq -r '.services[0] | (.deployments | length) == 1 and .deployments[0].rolloutState == "COMPLETED" and .runningCount == .desiredCount and .desiredCount == 1' <<< "$servico")" = "true" ]; then
+                grupo="$(jq -r '.services[0].loadBalancers[0].targetGroupArn // empty' <<< "$servico")"
+                if [ -n "$grupo" ] && saude="$(aws elbv2 describe-target-health --target-group-arn "$grupo" --output json)" \
+                  && [ "$(jq '[.TargetHealthDescriptions[] | select(.TargetHealth.State == "healthy")] | length >= 1' <<< "$saude")" = "true" ]; then
+                  estavel=true
+                  break
+                fi
+              fi
+            fi
+            if [ "$SECONDS" -ge "$limite" ]; then
+              echo "::error::O serviço não ficou estável com alvo healthy em 15 minutos"
+              break
+            fi
+            sleep 15
+          done
+          if [ "$estavel" != "true" ]; then
+            echo "Últimos eventos do serviço:"
+            aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" --query 'services[0].events[0:8].message' --output text || true
+            echo "Últimos logs da API:"
+            aws logs tail "$LOG_GROUP" --log-stream-name-prefix api --since 20m | tail -n 60 || true
+            exit 1
+          fi
+          echo "Serviço estável e alvo healthy."
+
+      # --retry-all-errors cobre DNS recém-criado, conexão recusada e 5xx enquanto o ALB termina de registrar o alvo.
+      # /api/assets prova a conexão com o banco e as migrations; /health não consulta o banco.
+      - name: Smoke - /health e /api/assets
+        env:
+          ALB: ${{ steps.saidas.outputs.alb }}
+        run: |
+          for caminho in /health /api/assets; do
+            curl --silent --show-error --fail --max-time 10 --retry 30 --retry-delay 5 --retry-all-errors \
+              --retry-max-time 240 --output /dev/null --write-out "$caminho -> %{http_code}\n" "http://$ALB$caminho"
+          done
+
+      # Sem diferença: prova que nada ficou fora do código (drift) depois dos dois applies.
+      - name: Plan sem diferença
+        env:
+          SHA: ${{ steps.sha.outputs.sha }}
+          EXPIRES_AT: ${{ steps.prazo.outputs.expires_at }}
+        run: |
+          set +e
+          terraform plan -detailed-exitcode -input=false -lock-timeout=5m -var-file=environments/aws.tfvars \
+            -var "region=$AWS_REGION" -var "expires_at=$EXPIRES_AT" -var "image_sha=$SHA" -var "service_desired_count=1"
+          codigo=$?
+          set -e
+          if [ "$codigo" -eq 2 ]; then
+            echo "::error::O plan seguinte ao apply tem diferença (drift)"
+            exit 1
+          fi
+          exit "$codigo"
+
+      - name: Resumo
+        env:
+          ALB: ${{ steps.saidas.outputs.alb }}
+          SHA: ${{ steps.sha.outputs.sha }}
+          EXPIRES_AT: ${{ steps.prazo.outputs.expires_at }}
+        run: |
+          {
+            echo "## Ambiente no ar"
+            echo
+            echo "- DNS do ALB: http://$ALB"
+            echo "- SHA da imagem: $SHA"
+            echo "- Expira em: $EXPIRES_AT (o agendado destrói o ambiente vencido)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Destrói o ambiente atual e confere a conta. Sem `acao = destruir` o job nem entra.
+  destruir:
+    name: Destruir o ambiente
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.acao == 'destruir' &&
+      github.ref == 'refs/heads/main' && vars.AWS_ROLE_ARN != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: aws
+    concurrency:
+      group: infra-aws-manual
+      cancel-in-progress: false
+    permissions:
+      contents: read # ler o código
+      id-token: write # trocar o token OIDC do GitHub por credencial temporária da AWS
+    defaults:
+      run:
+        shell: bash
+        working-directory: infra/aws
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Credencial da AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-duration-seconds: 7200
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.17.0
+          terraform_wrapper: false
+
+      - name: Terraform init
+        env:
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: >
+          terraform init -input=false -lock-timeout=5m
+          -backend-config=environments/aws.backend.hcl -backend-config="bucket=$TF_STATE_BUCKET"
+
+      # Uma tarefa de migração solta impediria a exclusão do cluster. continue-on-error: uma falha aqui (rede, região)
+      # não pode pular o destroy; o destroy e a verificação de zerado seguem decidindo a cor do job.
+      - name: Parar tarefas de migração
+        continue-on-error: true
+        run: bash scripts/parar-migracao.sh
+
+      # Valores de marcação quando o state não tem os outputs (apply interrompido): a validation aceita passado.
+      - name: Ler expires_at e image_sha do state
+        id: estado
+        run: |
+          expires="$(terraform output -raw expires_at 2> /dev/null || true)"
+          sha="$(terraform output -raw image_sha 2> /dev/null || true)"
+          if [[ ! "$expires" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+(Z|[+-][0-9]{2}:[0-9]{2})$ ]]; then
+            expires="$MARCACAO_EXPIRES_AT"
+          fi
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            sha="$MARCACAO_IMAGE_SHA"
+          fi
+          echo "expires_at=$expires" >> "$GITHUB_OUTPUT"
+          echo "image_sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Terraform destroy
+        env:
+          EXPIRES_AT: ${{ steps.estado.outputs.expires_at }}
+          SHA: ${{ steps.estado.outputs.image_sha }}
+        run: >
+          terraform destroy -auto-approve -input=false -lock-timeout=5m -var-file=environments/aws.tfvars
+          -var "region=$AWS_REGION" -var "expires_at=$EXPIRES_AT" -var "image_sha=$SHA" -var "service_desired_count=0"
+
+      # Olha a conta, não o state. Resíduo logo depois do destroy é repetido uma vez; "não verificou" nunca é.
+      - name: Verificação de zerado
+        run: bash scripts/verificar-zerado-apos-destroy.sh
+
+  # Rede de segurança do `subir` e do `destruir`: se qualquer um falhar ou for cancelado, destrói de novo com
+  # credencial nova (a sessão anterior pode ter expirado) e confere a conta. Fica vermelho se sobrar algo.
+  limpar:
+    name: Limpar depois de falha ou cancelamento
+    needs: [subir, destruir]
+    # failure() || cancelled() como na spec, restrito a execuções manuais e refinado por `iniciou`: um `subir` que
+    # falha nas guardas (entrada inválida, GHCR) não mexeu em nada e não pode derrubar um ambiente que esteja no ar.
+    if: >-
+      (failure() || cancelled()) && github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' && vars.AWS_ROLE_ARN != '' &&
+      (needs.destruir.result == 'failure' || needs.destruir.result == 'cancelled' ||
+      (needs.subir.outputs.iniciou == 'true' && (needs.subir.result == 'failure' || needs.subir.result == 'cancelled')))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: aws
+    # Grupo próprio e sem cancelar: não divide o `infra-aws-manual`, onde um limpar pendente poderia ser descartado
+    # por outra execução na fila. Duas limpezas simultâneas se serializam pelo lock do state.
+    concurrency:
+      group: infra-aws-limpar
+      cancel-in-progress: false
+    permissions:
+      contents: read # ler o código
+      id-token: write # trocar o token OIDC do GitHub por credencial temporária da AWS
+    defaults:
+      run:
+        shell: bash
+        working-directory: infra/aws
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Credencial da AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-duration-seconds: 7200
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.17.0
+          terraform_wrapper: false
+
+      - name: Terraform init
+        env:
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: >
+          terraform init -input=false -lock-timeout=5m
+          -backend-config=environments/aws.backend.hcl -backend-config="bucket=$TF_STATE_BUCKET"
+
+      # continue-on-error: ver o mesmo passo no job destruir.
+      - name: Parar tarefas de migração
+        continue-on-error: true
+        run: bash scripts/parar-migracao.sh
+
+      - name: Ler expires_at e image_sha do state
+        id: estado
+        run: |
+          expires="$(terraform output -raw expires_at 2> /dev/null || true)"
+          sha="$(terraform output -raw image_sha 2> /dev/null || true)"
+          if [[ ! "$expires" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+(Z|[+-][0-9]{2}:[0-9]{2})$ ]]; then
+            expires="$MARCACAO_EXPIRES_AT"
+          fi
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            sha="$MARCACAO_IMAGE_SHA"
+          fi
+          echo "expires_at=$expires" >> "$GITHUB_OUTPUT"
+          echo "image_sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Terraform destroy
+        env:
+          EXPIRES_AT: ${{ steps.estado.outputs.expires_at }}
+          SHA: ${{ steps.estado.outputs.image_sha }}
+        run: >
+          terraform destroy -auto-approve -input=false -lock-timeout=5m -var-file=environments/aws.tfvars
+          -var "region=$AWS_REGION" -var "expires_at=$EXPIRES_AT" -var "image_sha=$SHA" -var "service_desired_count=0"
+
+      - name: Verificação de zerado
+        run: bash scripts/verificar-zerado-apos-destroy.sh
+
+  # A cada 30 min: destrói o ambiente vencido e, sem ambiente ativo, confere a conta (camadas 3 e 4).
+  agendado:
+    name: Agendado (TTL e verificação de zerado)
+    if: github.event_name == 'schedule' && vars.AWS_ROLE_ARN != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: aws
+    # Grupo próprio: a fila do concurrency guarda só a execução pendente mais recente, e no mesmo grupo um cron
+    # descartaria um `destruir` manual que esperava. A serialização com o manual vem do lock do state e da guarda abaixo.
+    concurrency:
+      group: infra-aws-agendado
+      cancel-in-progress: false
+    permissions:
+      contents: read # ler o código
+      id-token: write # trocar o token OIDC do GitHub por credencial temporária da AWS
+      actions: read # gh run list: ver se há execução manual em andamento ou na fila
+    defaults:
+      run:
+        shell: bash
+        working-directory: infra/aws
+    steps:
+      # Execução manual em andamento ou na fila: este ciclo termina em verde com aviso e deixa para o próximo, para
+      # não ler o state no meio de um apply e acusar resíduo falso.
+      - name: Guarda - execução manual em andamento
+        id: guarda
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORIO: ${{ github.repository }}
+        run: |
+          ativas=0
+          for situacao in in_progress queued waiting requested pending; do
+            quantas="$(gh run list --repo "$REPOSITORIO" --workflow infra-aws.yml --event workflow_dispatch \
+              --status "$situacao" --json databaseId --jq length)"
+            ativas=$((ativas + quantas))
+          done
+          if (( ativas > 0 )); then
+            echo "::warning::Há $ativas execução(ões) manual(is) do infra-aws em andamento ou na fila: este ciclo não mexe em nada."
+            echo "pular=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "pular=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.guarda.outputs.pular != 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Credencial da AWS (OIDC)
+        if: steps.guarda.outputs.pular != 'true'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-duration-seconds: 7200
+
+      - name: Configurar Terraform
+        if: steps.guarda.outputs.pular != 'true'
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.17.0
+          terraform_wrapper: false
+
+      # Erro ao ler o state (permissão, rede, bucket) deixa o ciclo VERMELHO: nunca vale como "sem ambiente".
+      - name: Terraform init
+        if: steps.guarda.outputs.pular != 'true'
+        env:
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: >
+          terraform init -input=false -lock-timeout=5m
+          -backend-config=environments/aws.backend.hcl -backend-config="bucket=$TF_STATE_BUCKET"
+
+      # "No state file was found" é o estado nunca criado (sem ambiente); qualquer outro erro é falha de leitura.
+      - name: Ler o state
+        id: estado
+        if: steps.guarda.outputs.pular != 'true'
+        run: |
+          erro_tmp="$(mktemp)"
+          set +e
+          lista="$(terraform state list 2> "$erro_tmp")"
+          codigo=$?
+          set -e
+          if [ "$codigo" -ne 0 ]; then
+            if grep -q 'No state file was found' "$erro_tmp"; then
+              lista=""
+            else
+              echo "::error::Falha ao ler o state do Terraform:"
+              head -n 20 "$erro_tmp"
+              exit 1
+            fi
+          fi
+          if [ -n "$lista" ]; then
+            echo "ativo=true" >> "$GITHUB_OUTPUT"
+            echo "O state tem $(wc -l <<< "$lista") recurso(s)."
+          else
+            echo "ativo=false" >> "$GITHUB_OUTPUT"
+            echo "State vazio: não há ambiente ativo."
+          fi
+
+      # Sem ambiente: a conta precisa estar zerada mesmo assim (resíduo de execução interrompida, recurso criado por fora).
+      # Aqui não há destroy anterior, então resíduo não é atraso de consistência e não se repete.
+      - name: Sem ambiente ativo - verificação de zerado
+        if: steps.guarda.outputs.pular != 'true' && steps.estado.outputs.ativo == 'false'
+        run: bash scripts/verificar-zerado.sh
+
+      # expires_at ausente, inválido ou vencido conta como vencido.
+      - name: Ambiente ativo - checar o TTL
+        id: ttl
+        if: steps.guarda.outputs.pular != 'true' && steps.estado.outputs.ativo == 'true'
+        run: |
+          expires="$(terraform output -raw expires_at 2> /dev/null || true)"
+          sha="$(terraform output -raw image_sha 2> /dev/null || true)"
+          agora="$(date +%s)"
+          vencido=true
+          restante=0
+          if [[ "$expires" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+(Z|[+-][0-9]{2}:[0-9]{2})$ ]] \
+            && alvo="$(date -u -d "$expires" +%s 2> /dev/null)"; then
+            restante=$((alvo - agora))
+            if (( restante > 0 )); then
+              vencido=false
+            fi
+          else
+            echo "::warning::expires_at ausente ou inválido no state: o ambiente conta como vencido."
+            expires="$MARCACAO_EXPIRES_AT"
+          fi
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            sha="$MARCACAO_IMAGE_SHA"
+          fi
+          {
+            echo "vencido=$vencido"
+            echo "expires_at=$expires"
+            echo "image_sha=$sha"
+          } >> "$GITHUB_OUTPUT"
+          if [ "$vencido" = "false" ]; then
+            {
+              echo "## Ambiente ativo"
+              echo
+              echo "Não vence ainda: restam $((restante / 3600))h$(( (restante % 3600) / 60 ))min (expira em $expires)."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Ambiente ativo e dentro do prazo: restam $((restante / 60)) min."
+          else
+            echo "Ambiente vencido: será destruído."
+          fi
+
+      # continue-on-error: ver o mesmo passo no job destruir.
+      - name: Ambiente vencido - parar tarefas de migração
+        if: steps.guarda.outputs.pular != 'true' && steps.ttl.outputs.vencido == 'true'
+        continue-on-error: true
+        run: bash scripts/parar-migracao.sh
+
+      # O script faz `plan -destroy` salvo e lê o TTL da tag expires_at do CLUSTER no prior_state desse plano (não do
+      # output expires_at, que num plan -destroy repete a -var passada). Um `subir` que prorrogue antes do plano é visto
+      # pela tag; um que grave depois deixa o plano obsoleto, e o Terraform o recusa. A fila manual é checada outra vez
+      # logo antes do apply (a guarda do começo do ciclo pode ter ficado velha).
+      - name: Ambiente vencido - destruir (plano salvo, se continuar vencido)
+        id: destruir
+        if: steps.guarda.outputs.pular != 'true' && steps.ttl.outputs.vencido == 'true'
+        env:
+          EXPIRES_AT: ${{ steps.ttl.outputs.expires_at }}
+          SHA: ${{ steps.ttl.outputs.image_sha }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORIO: ${{ github.repository }}
+        run: bash scripts/destruir-se-vencido.sh
+
+      # Só confere a conta se o destroy foi aplicado: ambiente prorrogado ou execução manual na fila não é resíduo.
+      - name: Ambiente vencido - verificação de zerado
+        if: steps.guarda.outputs.pular != 'true' && steps.destruir.outputs.destruiu == 'true'
+        run: bash scripts/verificar-zerado-apos-destroy.sh

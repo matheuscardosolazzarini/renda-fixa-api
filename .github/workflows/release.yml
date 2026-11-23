@@ -11,6 +11,10 @@ on:
       - "*.md"
       - "tests/**"
       - ".github/workflows/mutation.yml"
+      # Terraform da F11 e o workflow de infra não mudam a imagem. O Dockerfile.migrator fica na raiz
+      # de propósito: mexer nele continua disparando a release.
+      - "infra/**"
+      - ".github/workflows/infra-aws.yml"
   # Republica a `latest` à mão depois de um smoke instável, sem precisar de commit novo nem de
   # re-run. Está sujeito à mesma trava do passo `latest` (ref da main e SHA no topo da main).
   workflow_dispatch:
@@ -30,7 +34,10 @@ jobs:
   # Reaproveita o CI como workflow reutilizável: a imagem só é publicada com build e testes verdes.
   ci:
     name: CI
-    uses: ./.github/workflows/ci.yml
+    # O release reaproveita o CI do próprio repositório, no mesmo commit. A forma `./` é a que o GitHub documenta
+    # para workflow reutilizável local e não referencia nada externo; por isso o aviso self-repository do zizmor
+    # (que sugere a sintaxe `$/...`) é suprimido aqui, por decisão do Matheus.
+    uses: ./.github/workflows/ci.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read
 
@@ -121,9 +128,9 @@ jobs:
         with:
           persist-credentials: false
 
-      # Baixa o artefato publicado pelo job `bundle`: o smoke aplica o bundle baixado, que é o
-      # caminho de implantação, e não um arquivo gerado neste runner. O .dockerignore exclui
-      # `artifacts/` do contexto da imagem.
+      # Baixa o artefato publicado pelo job `bundle`: a imagem de migração é montada com o bundle
+      # baixado, que é o caminho de implantação, e não com um arquivo gerado neste runner. O
+      # .dockerignore exclui `artifacts/` do contexto da imagem da API.
       - name: Baixar bundle
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -147,20 +154,34 @@ jobs:
           --label "org.opencontainers.image.revision=$COMMIT_SHA"
           .
 
-      # A tag do SHA é a candidata: só a `latest` indica versão aprovada.
-      - name: Push da imagem (tag do SHA)
-        run: docker push "$IMAGE:$COMMIT_SHA"
+      # Imagem de migração: o contexto é só o diretório com o efbundle baixado. Mesmos rótulos da API.
+      - name: Build da imagem de migração (candidata)
+        run: >
+          docker build
+          --file Dockerfile.migrator
+          --tag "$IMAGE:$COMMIT_SHA-migrator"
+          --label "org.opencontainers.image.source=https://github.com/$REPOSITORY"
+          --label "org.opencontainers.image.revision=$COMMIT_SHA"
+          artifacts
 
-      # Aplica as migrations num banco limpo com o bundle baixado do artefato, e não com o
-      # código-fonte: o que se prova é o caminho de implantação. A conexão vai pela variável que a API
-      # também lê (a fábrica do contexto a exige mesmo no bundle). O download não preserva o bit de
-      # execução, então o chmod faz o mesmo que quem baixa o bundle.
-      - name: Smoke - aplicar bundle no banco limpo
+      # A tag do SHA é a candidata: só a `latest` indica versão aprovada. A imagem de migração leva
+      # o mesmo SHA com o sufixo -migrator e nunca ganha `latest`.
+      - name: Push das imagens (tag do SHA)
         run: |
-          chmod +x artifacts/efbundle
-          ./artifacts/efbundle
-        env:
-          ConnectionStrings__DefaultConnection: ${{ env.SMOKE_CONNECTION }}
+          docker push "$IMAGE:$COMMIT_SHA"
+          docker push "$IMAGE:$COMMIT_SHA-migrator"
+
+      # Aplica as migrations num banco limpo rodando a imagem de migração baixada do GHCR (e não o
+      # cache do build), que é o que o ECS vai executar. `--network host` alcança o PostgreSQL do
+      # service container em localhost. A conexão vai pela variável que a API também lê (a fábrica do
+      # contexto a exige mesmo no bundle).
+      - name: Smoke - aplicar migrations no banco limpo (imagem de migração)
+        run: |
+          docker image rm "$IMAGE:$COMMIT_SHA-migrator"
+          docker pull "$IMAGE:$COMMIT_SHA-migrator"
+          docker run --rm --network host \
+            -e ConnectionStrings__DefaultConnection="$SMOKE_CONNECTION" \
+            "$IMAGE:$COMMIT_SHA-migrator"
 
       # Remove a cópia local e baixa do GHCR: sem isso o `docker run` usaria o cache do build e não
       # provaria o que está no registro. `--network host` deixa a API alcançar o PostgreSQL do service

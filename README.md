@@ -430,8 +430,10 @@ de a imagem ser promovida, o próprio workflow a testa:
 1. Gera o migration bundle do EF Core e o anexa à execução como artefato `efbundle-<sha>`. O
    artefato fica disponível por 7 dias, e baixá-lo exige login no GitHub.
 2. Publica a imagem com a tag do SHA do commit, `ghcr.io/matheuscardosolazzarini/renda-fixa-api:<sha>`.
-3. Aplica o bundle num PostgreSQL limpo e sobe a imagem baixada do registro contra esse banco.
-   A execução só passa se `/health` e `/api/assets` responderem 200.
+   Desde a F11, publica também a imagem de migração, `:<sha>-migrator`, montada com o mesmo bundle.
+3. Aplica as migrations num PostgreSQL limpo rodando a imagem `<sha>-migrator` baixada do registro,
+   e sobe a imagem da API contra esse banco. A execução só passa se `/health` e `/api/assets`
+   responderem 200.
 4. Só depois disso move a tag `latest` para a mesma imagem, e só se o commit ainda for o topo da
    `main` naquele momento. Se a `main` já avançou (num re-run de uma execução antiga, por
    exemplo), o log traz um aviso e `latest` não se move.
@@ -536,13 +538,330 @@ Reinicie o contêiner (`docker restart renda-fixa-api-ghcr`) para a importação
 tornar público nas configurações do pacote, o `docker pull` só funciona com login no GitHub
 (`docker login ghcr.io`).
 
-### Por que a nuvem está adiada
+### Por que a nuvem estava adiada
 
-A publicação em nuvem com Terraform está adiada desde 08/11/2026. A assinatura do Azure foi
-desabilitada ao fim do crédito de avaliação, e não há orçamento para reativá-la. Terraform que
-nunca rodou contra um ambiente real não prova nada, então a fase volta quando houver um destino.
-Até lá, a entrega é a imagem no GHCR, validada no próprio pipeline. Os dois caminhos avaliados
-estão descritos em [`docs/ROADMAP.md`](docs/ROADMAP.md).
+A publicação em nuvem com Terraform esteve adiada de 08/11/2026 a 19/11/2026, quando voltou como
+F11. A assinatura do Azure foi desabilitada ao fim do crédito de avaliação, e não há orçamento para reativá-la. Terraform que
+nunca rodou contra um ambiente real não prova nada, e foi isso que adiou a fase. A F11 volta com um
+destino: uma conta AWS no Free account plan, com ambiente efêmero e validação ao vivo (ver
+[Nuvem na AWS (F11)](#nuvem-na-aws-f11)). Os dois caminhos avaliados antes dela estão descritos em
+[`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+## Nuvem na AWS (F11)
+
+A API roda na AWS num ambiente **efêmero**: sobe para uma demo, tem prazo de validade e é destruído
+sozinho. Nada que cobra por hora fica ligado fora dela. O ambiente (ECS Fargate, Application Load
+Balancer e RDS PostgreSQL 16, em `us-east-1`) é descrito em Terraform, em `infra/aws/`, e é
+operado pelo workflow `.github/workflows/infra-aws.yml`. O detalhamento e as decisões estão em
+[`docs/SPEC-F11-EXECUCAO.md`](docs/SPEC-F11-EXECUCAO.md).
+
+```mermaid
+flowchart LR
+    U[Internet] -->|HTTP 80| ALB[Application Load Balancer<br/>2 subnets públicas]
+    ALB -->|8080| T[Tarefa Fargate<br/>renda-fixa-api, IP público]
+    M[Tarefa avulsa<br/>migrator] -->|5432| RDS
+    T -->|5432| RDS[(RDS PostgreSQL 16<br/>db.t4g.micro, sem acesso público)]
+    T -->|pull da imagem| GHCR[ghcr.io]
+    T -->|connection string| SM[Secrets Manager]
+    T --> CW[CloudWatch Logs<br/>retenção 3 dias]
+```
+
+**Rede e security groups.** Só rede pública, sem NAT. A cadeia é internet, ALB (80), tarefa (8080) e RDS (5432), e
+cada elo só aceita o anterior. A saída também é restrita: o ALB só sai para a tarefa na 8080; a tarefa (API e
+migração, mesmo SG) só sai em 443 para a internet (GHCR, Secrets Manager, CloudWatch Logs, ECS e a API do SGS
+do Banco Central, todos por HTTPS) e em 5432 para o SG do RDS; o RDS não tem regra de saída. O DNS da VPC não
+precisa de regra: a documentação da AWS diz que security groups não o bloqueiam. O security group padrão da VPC é
+adotado sem nenhuma regra (`aws_default_security_group`), e o ALB descarta cabeçalhos HTTP inválidos
+(`drop_invalid_header_fields`).
+
+> **Aviso: a conta fica no Free account plan. Nunca faça upgrade.**
+>
+> A conta foi criada em "Sign up for AWS (advanced)", com o Free account plan. **Nunca faça upgrade
+> para o plano pago, nunca entre no AWS Organizations e nunca crie landing zone do Control Tower nem
+> IAM Identity Center em modo de organização.** Qualquer um desses faz o upgrade automático da conta,
+> e a partir daí a AWS cobra.
+>
+> **Data de fechamento da conta:** o plano dura 6 meses ou até acabarem os créditos, o que vier
+> primeiro. `(preencher no P0: data de criação + 6 meses)`
+>
+> Ao fechar a conta, apague a variable `AWS_ROLE_ARN` do repositório: sem ela, a guarda dos jobs
+> que falam com a AWS impede qualquer execução.
+
+### Bootstrap no CloudShell
+
+O bootstrap roda **uma vez**, pelo Matheus, no AWS CloudShell da conta, com MFA ativo no usuário
+root. O script não cria chave de acesso: o GitHub entra na AWS por OIDC. Ele é idempotente, então
+pode rodar de novo para corrigir um passo que falhou ou para atualizar as policies.
+
+```bash
+git clone --depth 1 --branch main https://github.com/matheuscardosolazzarini/renda-fixa-api.git
+bash renda-fixa-api/infra/aws/bootstrap/bootstrap.sh --email voce@exemplo.com
+```
+
+Até o merge da F11, use `--branch f11-nuvem-aws`. O e-mail é obrigatório (`--email`, ou a variável
+`BUDGET_EMAIL`) e é validado de forma estrita, porque entra em JSON. Com `--imprimir-policy-ci`, o
+script só imprime a policy da role do CI e não chama a AWS.
+
+O bootstrap cria o que não cobra por hora e que o Terraform do ambiente não pode criar nem destruir:
+
+- o bucket do state (`renda-fixa-api-tfstate-<conta>`), com acesso público bloqueado, SSE-S3,
+  versionamento, expiração das versões antigas em 7 dias e negação de acesso sem TLS;
+- o provedor OIDC do GitHub e a role `renda-fixa-gha`, com sessão de 2 h e trust só do environment
+  `aws` deste repositório;
+- a execution role `renda-fixa-api-execution` das tarefas ECS;
+- as service-linked roles de ECS, Elastic Load Balancing e RDS, se faltarem;
+- o budget `renda-fixa-api-mensal`, de US$ 5 por mês **sem créditos**, com alertas por e-mail em
+  US$ 1, US$ 3 e US$ 5.
+
+No fim, o script imprime os três identificadores que vão para o GitHub (`AWS_ROLE_ARN`, `AWS_REGION`
+e `TF_STATE_BUCKET`). Ele não imprime nenhum segredo.
+
+**Confirme a assinatura do e-mail do budget.** A AWS envia uma mensagem de inscrição para o endereço
+informado. Sem aceitá-la, os alertas da camada 5 não chegam.
+
+### Configuração no GitHub
+
+1. **Environment `aws`** (Settings, Environments). Em *Deployment branches*, use *Selected branches*
+   com **só `main`**. **Não configure required reviewers**: com aprovação obrigatória, o destroy
+   agendado ficaria esperando um humano e o TTL morreria.
+2. **Variables** (sem nenhum secret: a autenticação é OIDC):
+   - `AWS_ROLE_ARN`: variable de **repositório**, não de environment. Decisão de 19/11/2026: o `if`
+     de nível de job é avaliado antes de o job entrar no environment, então uma variable de
+     environment não chega ao guard. É seguro porque o trust da role exige
+     `sub = repo:matheuscardosolazzarini/renda-fixa-api:environment:aws`: só um job que entra no
+     environment `aws` consegue assumir a role.
+   - `AWS_REGION` (`us-east-1`) e `TF_STATE_BUCKET` (o nome impresso pelo bootstrap): variables do
+     environment `aws`.
+3. **Pacote do GHCR público.** A imagem `ghcr.io/matheuscardosolazzarini/renda-fixa-api` nasce
+   privada. Em *Package settings*, torne-a pública. O `subir` confere as tags sem login e reprova
+   se o pacote não for público.
+
+### Como subir e destruir
+
+Na aba Actions, rode o workflow **Infra AWS** (`workflow_dispatch`) na branch `main`:
+
+- `acao`: `subir` ou `destruir`;
+- `horas` (só para `subir`): inteiro de 1 a 12, padrão 4;
+- `sha` (só para `subir`, opcional): 40 hexadecimais minúsculos. Vazio = SHA lido do rótulo
+  `org.opencontainers.image.revision` da tag `latest`.
+
+O `subir` faz, nesta ordem:
+
+1. **Guardas:** entradas válidas; último commit da `main` com menos de 45 dias; resolve o SHA; confere
+   sem login que as tags `<sha>` e `<sha>-migrator` existem no GHCR.
+2. Calcula dois prazos: o definitivo (`expires_at`, agora + `horas`) e um **provisório** de 1 h (ou o
+   definitivo, se for menor). Faz `plan`, a trava de custo, a checagem de recriação e o `apply` com
+   `service_desired_count = 0` e o prazo provisório: rede, banco, secret, ALB, cluster e as duas task
+   definitions, sem nenhuma tarefa da API. O prazo provisório existe para o caso de o `subir` e o
+   `limpar` falharem: o ambiente meio montado não fica válido até o TTL inteiro, e o agendado o
+   destrói em até cerca de 1 h 30 min (1 h do prazo provisório, mais até 30 min até o próximo agendado,
+   mais a duração do ciclo).
+3. **Migração:** roda uma tarefa avulsa da família `renda-fixa-migrator`. Exige `exitCode 0`, e a
+   tarefa é parada ao fim, mesmo com falha.
+4. `plan`, trava de custo, checagem de recriação e `apply` com `service_desired_count = 1` e o prazo
+   **definitivo**: sobe a API. Trocar o prazo entre as fases é só um update no lugar da tag
+   `expires_at` do cluster e do output; nada é recriado.
+5. Espera o serviço estável e o alvo do ALB `healthy` (prazo de 15 min).
+6. Smoke no DNS do ALB: `/health` e `/api/assets` precisam responder 200.
+7. `plan -detailed-exitcode`: precisa sair sem diferença.
+8. Resumo do job com o DNS do ALB, o SHA e o `expires_at`.
+
+A ordem é obrigatória. Se a API subisse antes das migrations, a importação de índices da partida
+falharia por falta da tabela `index_rate` e só tentaria de novo em 6 horas.
+
+**Recriação do banco ou do secret.** A senha do banco nasce a cada execução e entra no RDS e no secret
+uma única vez. Se um `plan` do `subir` (prorrogar um ambiente existente, por exemplo) trouxer a
+**substituição** do RDS ou da versão do secret, o passo "Bloquear recriação" reprova antes do `apply`:
+com o banco novo e o secret antigo, a API subiria com a senha errada. A mensagem lista o recurso e
+manda rodar `destruir` e depois `subir` de novo. O `limpar` já destrói o ambiente depois dessa falha.
+
+**Prorrogar** é rodar `subir` de novo antes do vencimento. Como a primeira fase zera as tarefas, a API
+reinicia (e a importação do BC roda de novo). Passe o mesmo `sha` se quiser manter a imagem: sem ele,
+o `subir` usa a `latest`, que pode ser outra versão.
+
+**Destruir** (`acao = destruir`) lê `expires_at` e `image_sha` do state, para tarefas de migração,
+destrói o ambiente e confere a conta. Termina vermelho se sobrar qualquer recurso. O passo que para as
+tarefas de migração tem `continue-on-error`: se ele falhar (rede, região), o `destroy` roda mesmo assim,
+e o `destroy` e a verificação de zerado continuam decidindo a cor do job. O `limpar` e o agendado fazem o
+mesmo.
+
+**O primeiro `subir` exige um merge na `main`** com o `release.yml` desta fase: as imagens publicadas
+antes dela não têm a tag `-migrator`, e a guarda reprova o `subir` antes de criar qualquer coisa.
+
+**O agendado** roda a cada 30 min (minutos 7 e 37). Se há uma execução manual do workflow em andamento
+ou na fila, ele termina com aviso e deixa para o próximo ciclo. Sem ambiente no state, só confere a
+conta. Com ambiente vencido, ou com `expires_at` ausente ou inválido, destrói e confere. Dentro do
+prazo, termina verde e mostra o tempo restante.
+
+O destroy do agendado não pode derrubar um ambiente que um `subir` esteja prorrogando, então ele não é um
+`terraform destroy` direto (`infra/aws/scripts/destruir-se-vencido.sh`). Ele faz `plan -destroy` com o plano
+salvo e lê o prazo da **tag `expires_at` do cluster** no state desse mesmo plano (não do output `expires_at`:
+num `plan -destroy` o Terraform recalcula os outputs com as variáveis da chamada, então o output só repete o
+valor já lido). Só segue se a tag continuar vencida, ausente, inválida ou acima do limite de 12 h da `validation` do
+Terraform (mais 10 min de folga: uma tag assim só pode ter sido editada fora do Terraform, e nunca prorroga). Depois confere a fila manual de novo
+logo antes de aplicar e aplica o plano salvo. Assim, um `subir` que prorrogue o ambiente antes do plano é visto
+pela tag, e um que grave o state depois do plano faz o Terraform recusar o plano (`Saved plan is stale`) e
+nada é destruído. A verificação de zerado só roda depois de um destroy aplicado.
+
+**O `limpar`** roda quando um `subir` que já tinha começado a alterar a conta falha ou é cancelado, ou
+quando um `destruir` falha ou é cancelado. Ele destrói de novo, com credencial nova, e fica vermelho
+se sobrar algo. Um `subir` que nem chegou às alterações (entrada inválida, imagem ausente no GHCR) não
+dispara o `limpar`, para não derrubar um ambiente que esteja no ar.
+
+**Espere o `limpar` terminar antes de disparar um novo `subir`.** O `limpar` tem grupo de concurrency
+próprio e não bloqueia o `subir`: um `subir` novo na mesma hora disputaria o lock do state com a limpeza
+ou teria o ambiente destruído no meio do `apply`. Confira na aba Actions que não há `limpar` em
+andamento.
+
+### Camadas de proteção de custo
+
+| Camada | O que faz | Depende do GitHub? |
+|---|---|---|
+| 1. Plano gratuito | Conta no Free account plan: no plano gratuito a AWS não cobra, e o pior caso é consumir os créditos | Não |
+| 2. Ambiente efêmero | Tudo o que cobra por hora (ALB, RDS, tarefas, IPv4 públicos, secret) sobe e desce no mesmo state | — |
+| 3. TTL | Todo `subir` grava `expires_at` (padrão 4 h, máximo 12 h). O agendado destrói o ambiente vencido, e o `limpar` destrói o que falhou | Sim |
+| 4. Verificação de zerado | Confere na conta, não no state, os tipos que cobram por hora e que `scripts/verificar-zerado.sh` consulta (ECS, ALB e target groups, RDS com snapshots e backups retidos, NAT, Elastic IP, ENI com IPv4 público, EC2, VPC endpoint, secrets, log groups do projeto e chaves KMS de cliente), mais tudo o que tiver a tag `project=renda-fixa-api`, em uma região (a passada, `us-east-1`). Fica de fora o que está em outras regiões e os tipos fora dessa lista; a rede de segurança para isso é o orçamento (camada 5). Roda depois de todo `destroy` e em todo ciclo agendado sem ambiente ativo | Sim |
+| 5. Orçamento | Budget do bootstrap, de US$ 5 por mês, sem créditos, com alertas em US$ 1, 3 e 5 | Não |
+| 6. Trava de custo | (a) O plano só pode ter tipos de recurso de uma lista positiva, com atributos dentro dos limites (inclusive RDS com `deletion_protection`, sem `skip_final_snapshot`, que mantém backups automáticos ou exporta logs; ALB com `enable_deletion_protection`; secret com janela de recuperação; cluster ECS sem `containerInsights = disabled`); roda no PR e antes de cada `apply`. (b) A policy da role do CI nega as ações caras, em qualquer região | (a) sim; (b) não |
+
+Os dados de faturamento da AWS atrasam de horas a um dia, então o alerta da camada 5 chega com
+atraso de um dia, não de minutos.
+
+### Resíduos e como cada um é tratado
+
+| Resíduo | Tratamento |
+|---|---|
+| Tarefa avulsa de migração, fora do state | Parada em passo `if: always()` e pelos scripts de parada; a verificação lista tarefas em qualquer cluster |
+| IPv4 público de ENI (tarefas e ALB) | A verificação lista ENIs com IPv4 público e os endereços IPv4 públicos da conta |
+| Secret na janela de recuperação | `recovery_window_in_days = 0`; a verificação também lista secrets agendados para exclusão |
+| Log group | Criado pelo Terraform com retenção de 3 dias; sem exportação de logs do RDS e sem Container Insights; a verificação lista os log groups do projeto |
+| Snapshot e backup automático do RDS | `skip_final_snapshot`, `backup_retention_period = 0` e `delete_automated_backups`; a verificação lista snapshots e backups retidos |
+| Chave KMS de cliente | Proibida: RDS e Secrets Manager usam as chaves gerenciadas pela AWS; a trava e a policy barram a criação, e a verificação lista chaves de cliente |
+| Versões antigas do state | Expiram em 7 dias no bucket versionado. O state não tem senha |
+| Lock do state preso | `-lock-timeout=5m` nos comandos do Terraform; ver "Lock preso" abaixo |
+| Tags de candidatas no GHCR | Sem custo; a imagem `-migrator` dobra o acúmulo (R-15 do ROADMAP) |
+| Recursos antigos da Azure (`rg-renda-fixa`) | Fora desta conta; nunca reativar a assinatura sem apagá-los antes |
+
+### Custo
+
+Com o ambiente ligado em `us-east-1`, os valores aproximados por hora são: ALB, cerca de US$ 0,023
+mais LCU; RDS `db.t4g.micro`, cerca de US$ 0,016; Fargate 0,25 vCPU e 0,5 GB, cerca de US$ 0,012; e
+IPv4 públicos, cerca de US$ 0,005 cada (dois do ALB e um da tarefa). A ordem de grandeza é de US$ 0,30
+por demo de 4 h. Os valores finais são conferidos no Cost Explorer depois da validação ao vivo.
+
+No Free account plan, isso é **consumo de crédito, não cobrança**.
+
+### Riscos aceitos
+
+- **Sem autenticação durante a demo.** Qualquer pessoa com o DNS do ALB pode gravar dados. O banco é
+  destruído no fim da janela.
+- **Banco vazio a cada demo.** A API reimporta o histórico do BC na partida, o que leva alguns minutos.
+- **Alerta de orçamento atrasado.** Pode chegar com até um dia de atraso.
+- **Cron de 30 min.** São cerca de 1.440 execuções por mês. Não custa nada em repositório público, mas
+  estouraria a franquia de Actions se o repositório ficasse privado.
+- **Workflow desativado por inatividade.** O GitHub desativa workflows agendados de repositório público
+  depois de 60 dias sem atividade. O `subir` e o agendado estão no mesmo arquivo, então um workflow
+  desativado também não sobe nada. Para evitar que isso aconteça no meio de um TTL, o `subir` recusa
+  rodar se o último commit da `main` tiver 45 dias ou mais. Para reativar, use o botão Enable workflow
+  na aba Actions e faça um commit.
+- **O agendado pode vencer a corrida contra um `subir` que prorroga o ambiente.** O agendado aplica o plano
+  de destroy salvo, e o Terraform recusa esse plano se o state mudou depois dele. Sobra uma janela: o
+  agendado aplicar o destroy antes de o `subir` gravar qualquer coisa. Nesse caso o ambiente estava vencido
+  e intocado, o destroy é legítimo, e o `subir` fica vermelho com `Saved plan is stale` (o `limpar`
+  destrói o que sobrar); basta rodá-lo de novo.
+- **Não cancele um `subir` durante o `apply`.** Cancelar enquanto o Terraform aplica pode deixar um
+  recurso criado fora do state (órfão) e o lock do state preso, e o `limpar`, que destrói pelo state,
+  não enxerga o órfão. Não há correção de código barata para isso, então o risco é aceito. O
+  cancelamento fora de um `apply` (por exemplo, na espera da migração ou na espera do serviço) é limpo
+  pelo `limpar`. Para parar um ambiente, espere o `subir` terminar ou falhar e rode `destruir`. Se o
+  cancelamento durante o `apply` acontecer, siga o roteiro de [Lock preso](#lock-preso).
+- **A role do CI lê o secret.** A role `renda-fixa-gha` tem `secretsmanager:GetSecretValue` nos secrets
+  `renda-fixa-api/*`, porque o provider lê o secret depois de criá-lo. Só um job do environment `aws`,
+  na `main`, assume a role (trust por `sub`), e a connection string só existe durante a janela da demo.
+- **`ecs:RunTask` e `ecs:StopTask` da role do CI são restritos** à task definition `renda-fixa-migrator`
+  e ao cluster `renda-fixa-api`. Se a infra mudar o nome do cluster ou da família, atualize a policy no
+  bootstrap (`infra/aws/bootstrap/bootstrap.sh`) e rode-o de novo.
+
+### Lock preso
+
+Se um job morrer no meio de um `apply`, o lock do state pode ficar preso. Enquanto ele existir, o
+agendado fica vermelho. Antes de desbloquear, confira na aba Actions que nenhuma execução do
+`infra-aws` está rodando: forçar o desbloqueio durante um `apply` vivo pode corromper o state.
+
+O CloudShell traz a AWS CLI, mas **não traz o Terraform**, então o desbloqueio usa só a AWS CLI. O
+backend usa `use_lockfile`: o lock é o objeto `<key>.tflock` no bucket do state, onde `<key>` é o `key`
+de `infra/aws/environments/aws.backend.hcl` (`renda-fixa-api/aws.tfstate`). No CloudShell, com a sessão
+do Matheus, primeiro leia o lock:
+
+```bash
+BUCKET=<TF_STATE_BUCKET>
+aws s3 cp "s3://$BUCKET/renda-fixa-api/aws.tfstate.tflock" -
+```
+
+A saída é um JSON com `ID`, `Operation`, `Who` e `Created`. Confira que `Who` é o runner do job que
+morreu e que `Created` é antigo (mais do que a duração de um `apply`). Se o comando falhar com
+`404` (a chave não existe), não há lock preso. Só então remova o objeto:
+
+```bash
+aws s3 rm "s3://$BUCKET/renda-fixa-api/aws.tfstate.tflock"
+```
+
+As mesmas informações (`ID`, `Operation`, `Who`, `Created`) aparecem na mensagem de erro do Terraform
+quando ele não consegue o lock.
+
+**Depois de cancelar um `subir` durante o `apply`.** O cancelamento pode ter deixado, além do lock,
+recursos criados que o state não conhece. O roteiro de recuperação, nesta ordem:
+
+1. Espere qualquer `limpar` em andamento terminar (aba Actions) e confira que nenhuma execução do
+   `infra-aws` está rodando.
+2. Remova o lock, como acima (`aws s3 rm`).
+3. Rode o workflow com `acao = destruir`: ele destrói o que o state conhece.
+4. No CloudShell, rode a verificação (só leitura). O clone do bootstrap fica em `~/renda-fixa-api`; se
+   ele sumiu, clone de novo com o comando de "Bootstrap no CloudShell". A verificação lista, por tipo e
+   identificador, o que sobrou nos tipos que ela consulta (ver a camada 4), inclusive o que o state não conhece:
+
+   ```bash
+   cd ~/renda-fixa-api/infra/aws
+   bash scripts/verificar-zerado.sh us-east-1
+   ```
+
+5. Remova os órfãos listados no console, ou pela tag `project=renda-fixa-api` (Resource Groups, Tag
+   Editor). Ordem sugerida: serviço e tarefas do ECS, listener, ALB e target group, RDS, secret, log
+   group, security groups, subnets, route table, internet gateway e VPC. O secret precisa de
+   `aws secretsmanager delete-secret --force-delete-without-recovery` na CLI, porque o console pede uma
+   janela de recuperação.
+6. Rode a verificação de novo (o mesmo bloco do passo 4) até ela terminar com "APROVADA".
+
+Na verificação, task definition INACTIVE e tarefa STOPPED achadas pela tag aparecem como `AVISO` e não
+reprovam: o provider só desregistra a task definition no destroy, e uma tarefa parada não custa. Cluster
+ECS INACTIVE (recém-apagado) também é aviso.
+
+### Validação local e no PR
+
+O job `validar` roda em todo PR que mexe em `infra/aws/**`, no workflow ou no `README.md`, sem environment e sem
+credencial da AWS. Ele executa:
+
+- `terraform fmt -check -recursive`, `init -backend=false`, `validate` e `terraform test`, com
+  `mock_provider`;
+- os casos de teste dos scripts (`tests/trava-custo`, `tests/verificar-zerado` e `tests/parar-migracao`
+  com um shim do `aws`, `tests/agendado` com `terraform` e `gh` falsos e, no fim, casos com o Terraform real (pulados com aviso se o `terraform` não estiver no PATH; com `CI=true` falham), `tests/bloquear-recriacao`,
+  `tests/bootstrap`, `tests/lifecycle`, `tests/workflow`, `tests/readme` e `tests/seguranca` (regras de security group), todos com `rodar.sh`), que
+  precisam de `bash` e `jq`;
+- `scripts/verificar-sem-prevent-destroy.sh`: reprova `prevent_destroy` e `destroy = false` (bloco
+  `removed`) em qualquer `.tf`, porque o primeiro faz o `destroy` abortar sem destruir nada, o segundo deixa o
+  recurso vivo fora do state, e nem o `terraform test` nem a trava de custo enxergam esses atributos;
+- `actionlint` e `zizmor` no workflow, e `shellcheck` nos scripts;
+- o ciclo no Floci: sobe o emulador, `apply` com `service_desired_count = 0`, trava de custo sobre o
+  plano, `destroy` e verificação de zerado.
+
+O Floci é um emulador. **Ele prova** que a configuração aplica e destrói sem erro numa API compatível,
+que a trava de custo lê um plano real e que a verificação de zerado chama as APIs certas e reprova um
+recurso sobrando. **Ele não prova** tarefa rodando, ALB roteando, health check, cadeia de security
+groups, IAM, OIDC, injeção do secret, logs nem custo. Essas coisas só são provadas na validação ao
+vivo.
+
+Os scripts `.sh` de `infra/aws/` são sempre chamados com `bash` e não dependem do bit de execução
+(que o Windows não preserva), por exemplo `bash infra/aws/scripts/verificar-zerado.sh`.
 
 ## Testes
 

@@ -1,0 +1,1 @@
+{"format_version":"1.2","resource_changes":[{"address":"aws_instance.bastion","mode":"managed","type":"aws_instance","name":"x","change":{"actions":["create"],"after":{"instance_type":"t4g.nano"}}}]}

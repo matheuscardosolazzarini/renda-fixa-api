@@ -13,7 +13,7 @@ seguintes.
 Ao final de cada alteração, rode `dotnet build` e `dotnet test` e corrija o que falhar.
 
 A v2 (F7 em diante) segue a ordem e os critérios de `docs/ROADMAP.md` e é conduzida pelo
-comando `/executar-fase F7` (ou F8, F9, F10), que coordena os agentes de
+comando `/executar-fase F7` (ou F8, F9, F10, F11), que coordena os agentes de
 `.claude/agents/`. Nenhuma fase da v2 começa com item da seção "Decisões em aberto" da
 especificação pendente para ela.
 
