@@ -326,6 +326,20 @@ segue inferida das saídas dela, não de metodologia publicada pelo BC. O QA nã
 riscos, todos de severidade baixa, os riscos 4, 5 e 7 foram corrigidos antes do commit e os outros oito
 ficam registrados em `docs/QA-F12.md`.
 
+### Pendências herdadas da F12
+
+Riscos da triagem do `docs/QA-F12.md`, todos de severidade baixa e nenhum bloqueante. Os riscos 4 (mensagem de `from == to` no acumulado de CDI), 5 (README do acumulado do IPCA) e 7 (prefixo e aviso de banco no `.http`) já foram corrigidos na própria F12.
+
+- [ ] **Datas em formatos ambíguos aceitas (risco 1).** `01/09/2026` é lido como `MM/dd` (9 de janeiro), e `2026-9-1`, `2026/09/01` e data com hora também são aceitos em `from`, `to` e `referenceDate`. A correção recusa formatos fora de `yyyy-MM-dd` e muda o contrato também das rotas antigas, por isso fica fora da F12. QA: A01, A12.
+- [ ] **Parâmetro repetido sem aviso (risco 2).** Com o mesmo parâmetro de query repetido, a API usa o primeiro valor e ignora os demais sem avisar. QA: A01, A12.
+- [ ] **`indexType` com espaços aceito (risco 3).** `%20Cdi%20` é aceito nas duas rotas, a de cotações e a do acumulado. QA: A02.
+- [ ] **Mensagens de IPCA sem identificar posição ou título (risco 8).** No resumo e na projeção por título, as mensagens de IPCA não dizem a qual posição ou título se referem, ao contrário das de CDI (a spec só manda identificar no CDI). QA: B07a, B08.
+- [ ] **Acumulado de CDI com lacuna sem o aviso da importação (risco 9).** A lacuna antes da última cotação responde 400 de cotação ausente, sem o aviso da importação que a projeção traz. QA: B03.
+- [ ] **Mensagens diferentes para a mesma lacuna de IPCA (risco 10).** A mesma lacuna gera a mensagem da janela de 12 meses para um aporte e a de cotação ausente para outro; as duas citam o mês. QA: B07c.
+- [ ] **Projeções longas lentas (risco 11).** Com centenas de aportes e data distante, a resposta passa de 1 s: o resumo de 262 posições em 2050-12-30 levou de 2,7 a 3,0 s; com a data padrão, fica abaixo de 0,15 s. QA: B10.
+- [ ] **Fora da F12: `PreFixed` no enum do Swagger.** O enum `IndexType` do Swagger lista `PreFixed`, que as rotas de cotação recusam com 400. QA: A28.
+- [ ] **Fora da F12: escala da taxa no `PUT` de título.** `PUT /api/assets/{id}` devolve `"rate":13` e o `GET` do mesmo título devolve `12.000000`, formato diferente entre respostas do mesmo recurso. QA: A29.
+
 ## Definição de pronto (vale para toda tarefa)
 
 Uma tarefa só está concluída quando passa nos sete pontos abaixo, além dos critérios da fase.
