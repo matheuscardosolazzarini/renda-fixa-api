@@ -13,7 +13,8 @@ public record PortfolioSummaryResponse(
     int PositionCount,
     IReadOnlyList<PortfolioSummaryResponse.AssetTypeSummaryResponse> ByAssetType,
     DateOnly ReferenceDate,
-    IReadOnlyList<PortfolioSummaryResponse.PortfolioPositionResponse> Positions)
+    IReadOnlyList<PortfolioSummaryResponse.PortfolioPositionResponse> Positions,
+    bool IsProjected)
 {
     public static PortfolioSummaryResponse FromSummary(
         PortfolioSummary summary,
@@ -28,7 +29,8 @@ public record PortfolioSummaryResponse(
         summary.PositionCount,
         summary.ByAssetType.Select(AssetTypeSummaryResponse.FromSummary).ToList(),
         referenceDate,
-        positions);
+        positions,
+        summary.IsProjected);
 
     // Item por composição: a projeção e o título são os mesmos DTOs dos endpoints próprios.
     public record PortfolioPositionResponse(PositionProjectionResponse Projection, AssetResponse Asset);

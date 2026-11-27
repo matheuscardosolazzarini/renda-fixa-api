@@ -14,19 +14,22 @@ public class AssetsController : ControllerBase
     private readonly IGetAssetByIdUseCase _getAssetByIdUseCase;
     private readonly IUpdateAssetUseCase _updateAssetUseCase;
     private readonly IDeleteAssetUseCase _deleteAssetUseCase;
+    private readonly IGetAssetProjectionUseCase _getAssetProjectionUseCase;
 
     public AssetsController(
         ICreateAssetUseCase createAssetUseCase,
         IGetAllAssetsUseCase getAllAssetsUseCase,
         IGetAssetByIdUseCase getAssetByIdUseCase,
         IUpdateAssetUseCase updateAssetUseCase,
-        IDeleteAssetUseCase deleteAssetUseCase)
+        IDeleteAssetUseCase deleteAssetUseCase,
+        IGetAssetProjectionUseCase getAssetProjectionUseCase)
     {
         _createAssetUseCase = createAssetUseCase;
         _getAllAssetsUseCase = getAllAssetsUseCase;
         _getAssetByIdUseCase = getAssetByIdUseCase;
         _updateAssetUseCase = updateAssetUseCase;
         _deleteAssetUseCase = deleteAssetUseCase;
+        _getAssetProjectionUseCase = getAssetProjectionUseCase;
     }
 
     [HttpPost]
@@ -52,6 +55,16 @@ public class AssetsController : ControllerBase
     public async Task<IActionResult> GetById(Guid id)
     {
         var response = await _getAssetByIdUseCase.ExecuteAsync(id);
+        return StatusCode(response.StatusCode, response);
+    }
+
+    [HttpGet("{id}/projection")]
+    [ProducesResponseType(typeof(ApiResponse<AssetProjectionResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<AssetProjectionResponse>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<AssetProjectionResponse>), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetProjection(Guid id, [FromQuery] DateOnly? referenceDate)
+    {
+        var response = await _getAssetProjectionUseCase.ExecuteAsync(id, referenceDate);
         return StatusCode(response.StatusCode, response);
     }
 

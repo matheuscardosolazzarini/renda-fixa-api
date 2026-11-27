@@ -10,7 +10,8 @@ public record PortfolioSummary(
     decimal TotalIofAmount,
     decimal TotalNetAmount,
     int PositionCount,
-    IReadOnlyList<PortfolioSummary.AssetTypeSummary> ByAssetType)
+    IReadOnlyList<PortfolioSummary.AssetTypeSummary> ByAssetType,
+    bool IsProjected)
 {
     // RN-07: os totais somam os valores de PositionProjection já arredondados por
     // Position.Project, sem arredondar a soma bruta — o consolidado precisa fechar
@@ -49,7 +50,8 @@ public record PortfolioSummary(
             TotalIofAmount: items.Sum(item => item.Projection.IofAmount),
             TotalNetAmount: totalNetAmount,
             PositionCount: items.Count,
-            ByAssetType: byAssetType);
+            ByAssetType: byAssetType,
+            IsProjected: items.Any(item => item.Projection.IsProjected));
     }
 
     public record AssetTypeSummary(

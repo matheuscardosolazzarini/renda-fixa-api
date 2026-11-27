@@ -11,4 +11,5 @@ public record PositionProjection(
     int BusinessDays,
     decimal IofRate,
     decimal IofAmount,
-    bool IsEstimated);
+    bool IsEstimated,
+    bool IsProjected);

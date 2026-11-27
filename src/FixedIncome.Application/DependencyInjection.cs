@@ -14,6 +14,7 @@ public static class DependencyInjection
         services.TryAddSingleton<TimeProvider, BrasiliaTimeProvider>();
 
         services.AddScoped<MarketDataLoader>();
+        services.AddScoped<PositionProjector>();
 
         services.AddScoped<ICreateAssetUseCase, CreateAssetUseCase>();
         services.AddScoped<IGetAllAssetsUseCase, GetAllAssetsUseCase>();
@@ -24,8 +25,10 @@ public static class DependencyInjection
         services.AddScoped<IGetAllPositionsUseCase, GetAllPositionsUseCase>();
         services.AddScoped<IGetPositionProjectionUseCase, GetPositionProjectionUseCase>();
         services.AddScoped<IGetPortfolioSummaryUseCase, GetPortfolioSummaryUseCase>();
+        services.AddScoped<IGetAssetProjectionUseCase, GetAssetProjectionUseCase>();
         services.AddScoped<IImportIndexRatesUseCase, ImportIndexRatesUseCase>();
         services.AddScoped<IGetIndexRatesUseCase, GetIndexRatesUseCase>();
+        services.AddScoped<IGetIndexAccumulationUseCase, GetIndexAccumulationUseCase>();
 
         return services;
     }

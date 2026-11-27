@@ -95,8 +95,9 @@ As casas decimais seguem a metodologia de DI da B3. A taxa diária tem 8 casas, 
 arredondamento. O acumulado é truncado em 16 casas a cada dia, e o fator final é arredondado
 em 8 casas antes de multiplicar pelo principal.
 
-Se faltar cotação de algum dia útil do período, a projeção não é calculada, e a resposta
-informa a primeira data sem cotação. Não há valor padrão nem estimativa.
+Se faltar cotação de um dia útil anterior à última cotação importada, a projeção não é
+calculada, e a resposta informa a primeira data sem cotação. Dias depois da última cotação
+seguem [Projeção com data futura](#projeção-com-data-futura).
 
 ### IPCA+
 
@@ -107,8 +108,9 @@ O fator IPCA é o produto de `(1 + IPCA do mês / 100)` de cada mês civil do pe
 inteiro entra com a variação completa. Um mês parcial entra elevado à fração de dias úteis
 do período sobre o total de dias úteis do mês civil.
 
-Um mês cujo IPCA ainda não foi divulgado usa a última variação publicada. Nesse caso a
-projeção sai com `isEstimated: true`. Quando o IPCA oficial é importado, as projeções
+Um mês já encerrado cujo IPCA ainda não foi divulgado usa a última variação publicada. Nesse caso a
+projeção sai com `isEstimated: true`. O mês de hoje e os seguintes usam a média geométrica dos
+12 meses que terminam no último publicado e saem com `isProjected: true` (ver "Projeção com data futura"). Quando o IPCA oficial é importado, as projeções
 passam a usá-lo, sem nenhuma alteração no cadastro.
 
 **Simplificações do IPCA.** A convenção de mercado usa a data de aniversário do título e
@@ -193,7 +195,8 @@ GET /api/positions/{id}/projection?referenceDate=2025-04-22
     "iofAmount": 1.48,
     "isEstimated": false,
     "referenceDate": "2025-04-22",
-    "applicationDate": "2025-04-01"
+    "applicationDate": "2025-04-01",
+    "isProjected": false
   }
 }
 ```
@@ -230,16 +233,18 @@ GET /api/portfolio/summary
     "positions": [
       {
         "projection": { "positionId": "…", "assetId": "…", "investedAmount": 500, "…": "…",
-                        "referenceDate": "2025-05-05", "applicationDate": "2025-05-05" },
+                        "referenceDate": "2025-05-05", "applicationDate": "2025-05-05",
+                        "isProjected": false },
         "asset": { "id": "…", "name": "LCI Banco Y", "issuer": "Banco Y", "assetType": "Lci",
                    "indexType": "Cdi", "rate": 100, "issueDate": "…", "maturityDate": "…" }
       },
       {
         "projection": { "positionId": "…", "…": "…", "referenceDate": "2025-04-22",
-                        "applicationDate": "2025-04-01" },
+                        "applicationDate": "2025-04-01", "isProjected": false },
         "asset": { "…": "…" }
       }
-    ]
+    ],
+    "isProjected": false
   }
 }
 ```
@@ -250,6 +255,108 @@ exceto na posição aportada depois da data padrão, que é projetada na própri
 `projection.referenceDate` dele. Com `referenceDate` informada, a posição aportada depois dela
 não entra no resumo nem em `positions`. Os totais incluem valores estimados quando algum item
 tem `isEstimated: true`.
+
+### Projeção por título
+
+`GET /api/assets/{id}/projection?referenceDate=` soma as projeções de todos os aportes de um
+título, com as mesmas regras de data do resumo. Sem `referenceDate`, vale a data padrão; com ela,
+os aportes posteriores ficam de fora. Os totais têm os mesmos nomes do resumo e são a soma dos
+itens já arredondados. A resposta não tem `isProjected` na raiz: para saber se algum aporte foi
+projetado, veja `isProjected` em cada item de `positions`.
+
+```
+GET /api/assets/{id}/projection?referenceDate=2025-04-22
+```
+
+```json
+{
+  "statusCode": 200,
+  "success": true,
+  "message": null,
+  "data": {
+    "assetId": "…",
+    "totalInvestedAmount": 2000,
+    "totalGrossAmount": 2009.86,
+    "totalGrossYield": 9.86,
+    "totalTaxAmount": 1.56,
+    "totalIofAmount": 2.96,
+    "totalNetAmount": 2005.34,
+    "positionCount": 2,
+    "referenceDate": "2025-04-22",
+    "positions": [ { "positionId": "…", "…": "…", "isProjected": false } ]
+  }
+}
+```
+
+Um título sem aportes incluídos responde 200, com totais zero, lista vazia e `referenceDate`.
+Título inexistente responde 404. Nas respostas de erro (400 e 404), `data` é nulo.
+
+### Variação acumulada de um indexador
+
+`GET /api/indexes/{indexType}/accumulated?from=&to=` devolve a variação acumulada de CDI ou de
+IPCA no período, em `accumulatedPercentage`, com até 6 casas. Usa só cotações publicadas, sem a
+estimativa nem a projeção. No CDI, `to` fica de fora, como no intervalo de dias úteis, então
+`to` precisa ser posterior a `from`: `from` igual a `to` responde 400 de período vazio. No IPCA,
+entram os meses de competência do mês de `from` ao mês de `to`, inclusive, sem pro rata: o mês
+de `from` entra inteiro mesmo com `from` no meio dele, e `from` igual a `to` devolve a variação
+desse mês.
+
+```
+GET /api/indexes/Cdi/accumulated?from=2026-09-01&to=2026-10-01
+```
+
+```json
+{
+  "statusCode": 200,
+  "success": true,
+  "message": null,
+  "data": {
+    "indexType": "Cdi",
+    "from": "2026-09-01",
+    "to": "2026-10-01",
+    "effectiveTo": "2026-10-01",
+    "accumulatedPercentage": 1.081673
+  }
+}
+```
+
+`effectiveTo` é a data efetivamente usada. Quando `to` passa da última cotação publicada, o
+período termina nela e a resposta não é erro: no CDI, `effectiveTo` é o dia útil seguinte à última
+cotação; no IPCA, é o último dia do último mês publicado. Sem esse corte, `effectiveTo` é igual a
+`to`. `from` posterior a `to`, ou um período sem nenhuma cotação publicada, responde 400.
+
+O acumulado do CDI fecha com o valor bruto de um título 100% do CDI no mesmo período, quando
+todos os dias do período têm cotação publicada. O do IPCA
+usa meses cheios e por isso não fecha com o bruto de um IPCA+, que usa pro rata em dias úteis
+nos meses parciais.
+
+### Projeção com data futura
+
+Quando o período inclui dias de CDI ainda não publicados (data informada depois da última
+cotação) ou o mês de hoje no IPCA, a projeção usa taxas projetadas e sai com `isProjected: true`. Na projeção de uma posição, o campo fica no próprio objeto. No
+resumo, fica na raiz (verdadeiro se algum item for projetado) e em cada `projection` dos itens.
+
+Taxa projetada não é previsão. É a hipótese de que as taxas recentes se mantêm: no CDI, a última
+taxa diária importada; no IPCA, a média geométrica dos 12 últimos meses, com 2 casas decimais. Ela não considera decisão do Copom já
+anunciada nem expectativas de mercado, e quem exibe o resultado deve dizer isso.
+
+A regra mudou o resultado de duas situações:
+
+- **IPCA+ no mês de hoje.** O mês de hoje, sem variação publicada, passa a ser projetado, em vez
+  de estimado com a última variação. O valor muda. Na consulta sem data e no resumo, um IPCA+ com
+  dia útil no mês de hoje sai projetado. Com menos de 12 meses de IPCA no banco, a projeção de
+  um IPCA+ que tenha dia útil no mês de hoje ou depois responde 400, dizendo quantos meses
+  existem e qual falta. O resumo sem data também responde 400 quando a carteira tem um IPCA+
+  assim. Antes respondia 200. Referência no primeiro dia útil do mês de hoje não tem dia desse
+  mês no intervalo e não muda.
+- **CDI com data informada depois da última cotação.** A data passa a ser projetada quando
+  nenhum dia útil sem cotação fica antes do dia útil anterior a hoje (Brasília). Isso vale com a
+  última cotação de até dois dias úteis antes de hoje. Antes disso, a resposta continua 400.
+
+Com a importação parada há mais de um dia útil, ou se o SGS atrasar um dia inteiro a publicação,
+a data informada depois da última cotação responde 400, com a mensagem de que a importação pode
+estar desligada. A data padrão nunca projeta CDI, porque é o
+dia útil seguinte à última cotação.
 
 ## Arquitetura
 
@@ -412,6 +519,11 @@ de um fluxo real: criar título, listar, registrar aporte, projetar, consolidar.
 consultam-se as cotações de CDI e IPCA e são feitas projeções de um CDB em CDI e de um CDB
 IPCA+. A variável de base no topo do arquivo aponta para a porta 5124, a do `dotnet run`; para
 a API em Docker (Compose ou imagem publicada, porta 8080), troque o número na primeira linha.
+
+As requisições gravam no banco da API para onde a variável aponta. Em 8080, esse banco é o do
+Compose, a carteira real: os títulos e aportes do exemplo entram nela. Os títulos criados levam
+o prefixo `EXEMPLO-` para serem reconhecidos, mas depois do primeiro aporte não podem ser
+removidos (RN-06).
 
 As cotações de CDI e IPCA são importadas do Banco Central ao iniciar a API e a cada 6 horas.
 Para desligar a importação, defina `IndexRatesImport:Enabled` como `false` (em variável de
@@ -869,7 +981,7 @@ Os scripts `.sh` de `infra/aws/` são sempre chamados com `bash` e não dependem
 dotnet test
 ```
 
-712 testes, executados a cada push pelo GitHub Actions.
+863 testes, executados a cada push pelo GitHub Actions.
 
 **Docker precisa estar em execução.** Os testes de repositório (`FixedIncome.Infrastructure.Tests`)
 e de ponta a ponta (`FixedIncome.Api.Tests`) rodam contra um PostgreSQL 16 real, subido pelo
@@ -888,10 +1000,10 @@ dotnet test tests/FixedIncome.Architecture.Tests
 
 | Camada | Testes | Linha | Branch |
 |---|---|---|---|
-| Domain | 332 | 96,3% | 100% |
-| Application | 132 | 94,2% | 98,9% |
-| Infrastructure | 172 | 99,7% | 98,4% |
-| Api | 68 | 96,4% | 91,3% |
+| Domain | 411 | 97,1% | 100% |
+| Application | 184 | 94,7% | 99,0% |
+| Infrastructure | 173 | 99,7% | 98,4% |
+| Api | 87 | 96,7% | 91,7% |
 | Architecture | 8 | sem cobertura | sem cobertura |
 
 O projeto `FixedIncome.Architecture.Tests` só verifica dependências entre camadas e não tem código de

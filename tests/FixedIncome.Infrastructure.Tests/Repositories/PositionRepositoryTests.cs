@@ -70,6 +70,35 @@ public class PositionRepositoryTests(PostgreSqlFixture fixture) : RepositoryTest
         Assert.Empty(result);
     }
 
+    // D-12: a ordem do consolidado, o aporte mais recente primeiro. Os aportes de outro título não
+    // entram, mesmo com datas no meio do intervalo.
+    [Fact]
+    public async Task Listar_por_titulo_retorna_os_aportes_do_mais_recente_para_o_mais_antigo()
+    {
+        // Arrange
+        var asset = CriarTitulo();
+        var outroAsset = CriarTitulo("CDB Banco Z");
+        Context.FixedIncomeAssets.AddRange(asset, outroAsset);
+        await Context.SaveChangesAsync();
+        var repositoryDeEscrita = new PositionRepository(Context);
+        var positionAntiga = new Position(asset, 1_000m, new DateOnly(2025, 1, 10));
+        var positionRecente = new Position(asset, 1_000m, new DateOnly(2025, 6, 1));
+        var positionIntermediaria = new Position(asset, 1_000m, new DateOnly(2025, 3, 15));
+        await repositoryDeEscrita.AddAsync(positionAntiga);
+        await repositoryDeEscrita.AddAsync(positionRecente);
+        await repositoryDeEscrita.AddAsync(new Position(outroAsset, 1_000m, new DateOnly(2025, 4, 1)));
+        await repositoryDeEscrita.AddAsync(positionIntermediaria);
+        using var contextoDeLeitura = CriarContexto();
+
+        // Act
+        var result = (await new PositionRepository(contextoDeLeitura).GetByAssetIdAsync(asset.Id)).ToList();
+
+        // Assert
+        Assert.Equal(
+            new[] { positionRecente.Id, positionIntermediaria.Id, positionAntiga.Id },
+            result.Select(p => p.Id));
+    }
+
     [Fact]
     public async Task Listar_todos_retorna_aportes_ordenados_por_data_de_aporte_decrescente()
     {
