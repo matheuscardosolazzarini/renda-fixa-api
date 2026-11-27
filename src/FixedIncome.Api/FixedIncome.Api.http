@@ -1,5 +1,7 @@
 # Base da API: 5124 com `dotnet run`, 8080 com Docker (Compose ou imagem publicada).
 # Para usar o Docker, troque 5124 por 8080 na linha abaixo.
+# As requisições gravam no banco da API apontada: em 8080, na carteira do Compose. Os títulos
+# criados levam o prefixo EXEMPLO- e, depois do primeiro aporte, não podem ser removidos (RN-06).
 @FixedIncome.Api_HostAddress = http://localhost:5124
 
 ### Criar título
@@ -8,7 +10,7 @@ POST {{FixedIncome.Api_HostAddress}}/api/assets
 Content-Type: application/json
 
 {
-  "name": "CDB Banco XYZ",
+  "name": "EXEMPLO-CDB Banco XYZ",
   "issuer": "Banco XYZ",
   "assetType": "Cdb",
   "indexType": "PreFixed",
@@ -30,7 +32,7 @@ PUT {{FixedIncome.Api_HostAddress}}/api/assets/{{createAsset.response.body.$.dat
 Content-Type: application/json
 
 {
-  "name": "CDB Banco XYZ Prefixado",
+  "name": "EXEMPLO-CDB Banco XYZ Prefixado",
   "issuer": "Banco XYZ",
   "rate": 13,
   "issueDate": "2025-01-01",
@@ -81,6 +83,15 @@ Accept: application/json
 GET {{FixedIncome.Api_HostAddress}}/api/indexes/Ipca?from=2026-01-01&to=2026-09-01
 Accept: application/json
 
+### Variação acumulada de CDI no período (to fica de fora, como nos dias úteis)
+GET {{FixedIncome.Api_HostAddress}}/api/indexes/Cdi/accumulated?from=2026-09-01&to=2026-10-01
+Accept: application/json
+
+### Variação acumulada de IPCA no período (meses cheios, o mês de to entra)
+# effectiveTo mostra até onde o período foi usado quando to passa da última cotação publicada.
+GET {{FixedIncome.Api_HostAddress}}/api/indexes/Ipca/accumulated?from=2026-01-01&to=2026-09-01
+Accept: application/json
+
 ### Indexador sem cotação (rejeitado: PreFixed)
 GET {{FixedIncome.Api_HostAddress}}/api/indexes/PreFixed?from=2026-09-14&to=2026-09-18
 Accept: application/json
@@ -91,7 +102,7 @@ POST {{FixedIncome.Api_HostAddress}}/api/assets
 Content-Type: application/json
 
 {
-  "name": "CDB Banco XYZ 100% CDI",
+  "name": "EXEMPLO-CDB Banco XYZ 100% CDI",
   "issuer": "Banco XYZ",
   "assetType": "Cdb",
   "indexType": "Cdi",
@@ -121,7 +132,7 @@ POST {{FixedIncome.Api_HostAddress}}/api/assets
 Content-Type: application/json
 
 {
-  "name": "CDB Banco XYZ IPCA+6%",
+  "name": "EXEMPLO-CDB Banco XYZ IPCA+6%",
   "issuer": "Banco XYZ",
   "assetType": "Cdb",
   "indexType": "Ipca",
@@ -143,6 +154,19 @@ Content-Type: application/json
 
 ### Projeção do CDB IPCA+ (isEstimated indica mês sem IPCA divulgado)
 GET {{FixedIncome.Api_HostAddress}}/api/positions/{{createIpcaPosition.response.body.$.data.id}}/projection?referenceDate=2026-07-01
+Accept: application/json
+
+### Projeção por título sem referenceDate (data padrão; soma os aportes do título)
+GET {{FixedIncome.Api_HostAddress}}/api/assets/{{createCdiAsset.response.body.$.data.id}}/projection
+Accept: application/json
+
+### Projeção por título com referenceDate
+GET {{FixedIncome.Api_HostAddress}}/api/assets/{{createCdiAsset.response.body.$.data.id}}/projection?referenceDate=2026-09-23
+Accept: application/json
+
+### Projeção de aporte com data futura (isProjected true, depois da última cotação de CDI)
+# Com a importação parada há mais de um dia útil, ou se o SGS atrasar um dia inteiro a publicação, a resposta é 400 com o aviso da importação.
+GET {{FixedIncome.Api_HostAddress}}/api/positions/{{createCdiPosition.response.body.$.data.id}}/projection?referenceDate=2026-12-31
 Accept: application/json
 
 ### Health check (liveness: 200 com o texto Healthy, sem consultar o banco)

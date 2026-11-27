@@ -182,7 +182,7 @@ public class PositionProjectionFlowTests(PostgreSqlFixture postgres) : ApiTestBa
     }
 
     [Fact]
-    public async Task Projecao_mantem_os_campos_antigos_com_os_mesmos_nomes_e_acrescenta_so_as_duas_datas()
+    public async Task Projecao_mantem_os_campos_antigos_com_os_mesmos_nomes_e_acrescenta_so_as_duas_datas_e_is_projected()
     {
         // Arrange
         var positionId = await CriarTituloEAporteAsync(maturityDate: "2027-01-01", applicationDate: "2025-04-01");
@@ -198,7 +198,7 @@ public class PositionProjectionFlowTests(PostgreSqlFixture postgres) : ApiTestBa
         {
             "positionId", "assetId", "investedAmount", "grossAmount", "grossYield", "taxRate", "taxAmount",
             "netAmount", "elapsedDays", "businessDays", "iofRate", "iofAmount", "isEstimated",
-            "referenceDate", "applicationDate"
+            "referenceDate", "applicationDate", "isProjected"
         };
         Assert.True(names.SetEquals(expected), $"Propriedades de data: {string.Join(", ", names)}");
     }

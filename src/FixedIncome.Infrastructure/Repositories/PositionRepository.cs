@@ -34,6 +34,7 @@ public class PositionRepository : IPositionRepository
         return await _context.Positions
             .AsNoTracking()
             .Where(p => p.AssetId == assetId)
+            .OrderByDescending(p => p.ApplicationDate)
             .ToListAsync();
     }
 

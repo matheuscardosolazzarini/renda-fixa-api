@@ -248,8 +248,57 @@ public class PortfolioSummaryTests
         Assert.NotEqual(2_016.33m, summary.TotalNetAmount);
     }
 
+    [Fact]
+    public void Raiz_e_projetada_quando_um_item_entre_outros_e_projetado()
+    {
+        // Arrange
+        var positions = new[]
+        {
+            (CriarProjecao(1_000m, 1_100m, 17.50m, 1_082.50m), AssetType.Cdb),
+            (CriarProjecao(1_000m, 1_050m, 11.25m, 1_038.75m, isProjected: true), AssetType.Cdb),
+            (CriarProjecao(500m, 550m, 0m, 550m), AssetType.Lci)
+        };
+
+        // Act
+        var summary = PortfolioSummary.Create(positions);
+
+        // Assert
+        Assert.True(summary.IsProjected);
+    }
+
+    [Fact]
+    public void Raiz_nao_e_projetada_quando_nenhum_item_e_projetado()
+    {
+        // Arrange
+        var positions = new[]
+        {
+            (CriarProjecao(1_000m, 1_100m, 17.50m, 1_082.50m), AssetType.Cdb),
+            (CriarProjecao(500m, 550m, 0m, 550m), AssetType.Lci)
+        };
+
+        // Act
+        var summary = PortfolioSummary.Create(positions);
+
+        // Assert
+        Assert.False(summary.IsProjected);
+    }
+
+    [Fact]
+    public void Raiz_nao_e_projetada_com_a_lista_vazia()
+    {
+        // Arrange
+        var positions = Array.Empty<(PositionProjection Projection, AssetType AssetType)>();
+
+        // Act
+        var summary = PortfolioSummary.Create(positions);
+
+        // Assert
+        Assert.False(summary.IsProjected);
+    }
+
     private static PositionProjection CriarProjecao(
-        decimal investedAmount, decimal grossAmount, decimal taxAmount, decimal netAmount, decimal iofAmount = 0m)
+        decimal investedAmount, decimal grossAmount, decimal taxAmount, decimal netAmount, decimal iofAmount = 0m,
+        bool isProjected = false)
     {
         return new PositionProjection(
             InvestedAmount: investedAmount,
@@ -262,6 +311,7 @@ public class PortfolioSummaryTests
             BusinessDays: 252,
             IofRate: 0m,
             IofAmount: iofAmount,
-            IsEstimated: false);
+            IsEstimated: false,
+            IsProjected: isProjected);
     }
 }

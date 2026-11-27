@@ -179,7 +179,7 @@ public class PortfolioSummaryFlowTests(PostgreSqlFixture postgres) : ApiTestBase
         // Act
         var response = await Client.GetAsync("/api/portfolio/summary?referenceDate=2025-04-22");
 
-        // Assert: as 8 propriedades antigas mais referenceDate e positions.
+        // Assert: as 8 propriedades antigas mais referenceDate, positions e isProjected.
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var json = await ReadJsonAsync(response);
         var data = json.RootElement.GetProperty("data");
@@ -187,7 +187,8 @@ public class PortfolioSummaryFlowTests(PostgreSqlFixture postgres) : ApiTestBase
         var expected = new HashSet<string>
         {
             "totalInvestedAmount", "totalGrossAmount", "totalGrossYield", "totalTaxAmount",
-            "totalIofAmount", "totalNetAmount", "positionCount", "byAssetType", "referenceDate", "positions"
+            "totalIofAmount", "totalNetAmount", "positionCount", "byAssetType", "referenceDate", "positions",
+            "isProjected"
         };
         Assert.True(names.SetEquals(expected), $"Propriedades de data: {string.Join(", ", names)}");
 

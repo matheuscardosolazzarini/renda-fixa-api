@@ -30,12 +30,16 @@ projetada para uma data, já líquida de imposto de renda.
 - Publicação em nuvem sob demanda na AWS, com infraestrutura como código em Terraform e ambiente
   efêmero destruído automaticamente (F11)
 - Testes de integração contra PostgreSQL real, regras de arquitetura e mutation testing
+- Contrato v2 para o front (F12): projeção com data futura (RN-12), variação acumulada de um
+  indexador (RN-13) e projeção consolidada por título (RN-14)
 
 ### Fora do escopo
 
 - Autenticação e multiusuário
 - Resgates parciais
-- Marcação a mercado do Tesouro Direto
+- Marcação a mercado do Tesouro Direto. O valor de um título do Tesouro antes do vencimento é
+  sempre o da curva (taxa contratada), e quem exibe deve deixar isso claro (decisão de
+  26/11/2026)
 
 Na v1, o IOF e a integração com API de mercado também estavam fora: os indexadores usavam
 taxas fixas configuradas em `appsettings.json`, porque buscar CDI e IPCA reais exigia
@@ -144,15 +148,16 @@ fora do período coberto pelo calendário cadastrado gera erro, nunca uma suposi
 dia útil do intervalo da RN-08, de `1 + CDI do dia × Rate / 100`, com o CDI do dia em fração
 (série 12 do SGS, publicada em % ao dia). O valor bruto é `InvestedAmount × fator`. As casas
 decimais do fator diário e do acumulado seguem a metodologia de DI da B3 e são fixadas na
-SPEC-F7. Se faltar cotação para algum dia útil do intervalo, a projeção não é calculada e a
-resposta informa a primeira data sem cotação.
+SPEC-F7. Se faltar cotação para algum dia útil do intervalo anterior à última cotação importada, a
+projeção não é calculada e a resposta informa a primeira data sem cotação. Dia útil posterior à
+última cotação segue a RN-12.
 
 **RN-10 — Rentabilidade IPCA+** (v2). O valor bruto é
 `InvestedAmount × fator IPCA × (1 + Rate / 100) ^ (DU / 252)`, com DU contado pela RN-08. O
 fator IPCA é o produto de `1 + IPCA do mês / 100` dos meses cheios do intervalo, com pro rata
 em dias úteis nos meses parciais. Substitui a soma simples de IPCA e taxa usada na v1. Para
-um mês cuja variação ainda não foi divulgada, usa-se a última variação mensal publicada, e a
-projeção sai marcada como estimada. Quando o IPCA oficial do mês é importado, as projeções
+um mês já encerrado cuja variação ainda não foi divulgada, usa-se a última variação mensal
+publicada, e a projeção sai marcada como estimada. O mês de hoje e os seguintes seguem a RN-12. Quando o IPCA oficial do mês é importado, as projeções
 seguintes passam a usá-lo. A estimativa vale só para meses posteriores ao último publicado:
 mês anterior ao último publicado e sem cotação é falha de importação, e a projeção não é
 calculada, com a resposta informando o mês sem cotação.
@@ -183,6 +188,64 @@ alíquota e valor de IOF, e a RN-07 se estende ao consolidado:
 projeção arredonda em ordem: valor bruto, depois IOF, depois IR, e o líquido é a subtração dos
 valores já arredondados.
 
+**RN-12 — Projeção com data futura** (v2, F12). Quando o intervalo da projeção, limitado pela
+RN-02, inclui dia de CDI ou mês de IPCA ainda não publicados nos termos abaixo, a projeção é
+calculada com taxas projetadas e sai com `isProjected` verdadeiro. Cada dia útil (RN-08) posterior à última cotação de CDI importada e a
+partir do dia útil anterior a hoje (Brasília) usa a taxa diária dessa última cotação, com as casas
+da RN-09. O dia útil anterior a hoje é o maior dia útil estritamente anterior a hoje, seja hoje dia
+útil ou não (num sábado, é a sexta, ou o dia útil antes dela se for feriado). Ele entra porque o CDI de um dia só é publicado no SGS no dia útil
+seguinte e a importação roda a cada 6 horas: sem ele, toda projeção futura falharia. Dia útil sem
+cotação posterior à última cotação e anterior ao dia útil anterior a hoje é falha de importação
+(400, com a mensagem que lembra que a importação pode estar desligada), como na RN-09 (decisão de
+27/11/2026). "Última cotação" é a do banco inteiro, não a do período consultado. O mês de IPCA de hoje (Brasília) e os seguintes, sem variação
+publicada, usam a média geométrica dos 12 meses de competência seguidos que terminam no último
+publicado, em percentual com 2 casas: `round(((∏ (1 + IPCA do mês / 100)) ^ (1 / 12) − 1) × 100, 2)`,
+com um único arredondamento, e o pro rata da RN-10. O mês de hoje conta como não encerrado até o
+último dia dele, porque o IPCA mede o mês inteiro e só é divulgado no mês seguinte. Um mês já
+encerrado e ainda não divulgado continua na RN-10 (última variação, `isEstimated`). As duas marcas
+são independentes e podem vir verdadeiras juntas. Valor publicado sempre prevalece sobre
+estimativa e projeção. Um PreFixed nunca é projetado. Se faltar algum dos 12 meses, a projeção
+futura de um título Ipca não é calculada e a resposta diz quantos meses existem e qual falta. A
+regra não muda o tratamento de lacunas: um dia útil sem cotação anterior à última cotação de
+CDI, ou um mês sem variação anterior ao último publicado, continua sendo falha de importação
+(RN-09 e RN-10). O limite do calendário (RN-08) também continua: data posterior à cobertura é
+400. IR e IOF seguem a RN-03 e a RN-11, com os prazos contados até a data de referência. No
+consolidado, `isProjected` na raiz é verdadeiro se algum item for projetado. Taxa projetada não é
+previsão: é a hipótese de que as taxas recentes se mantêm (no CDI, a última taxa diária importada;
+no IPCA, a média geométrica dos 12 últimos meses), sem decisão do Copom já anunciada
+nem expectativas de mercado, e quem exibe deve dizer isso. Duas consequências: um IPCA+ com dia
+útil no mês de hoje sai projetado também na consulta sem data (e, com menos de 12 meses de IPCA,
+responde 400); e uma data informada depois da última cotação de CDI é projetada em vez de erro
+quando a última cotação é de dois dias úteis antes de hoje ou mais recente. Com a importação parada
+há mais tempo, continua 400.
+
+**RN-13 — Variação acumulada de um indexador** (v2, F12). A variação acumulada usa só cotações
+publicadas, sem a estimativa da RN-10 nem a projeção da RN-12. No CDI, é o produto de
+`1 + CDI do dia / 100` para cada dia útil do intervalo da RN-08, com as casas da RN-09. No IPCA, é o
+produto de `1 + IPCA do mês / 100` dos meses de competência entre o mês de `from` e o mês de
+`to`, inclusive, sem pro rata, com o fator arredondado em 7 casas (a convenção que reproduz a
+Calculadora do Cidadão). O resultado é devolvido em percentual, `(fator − 1) × 100`, com 6 casas.
+Quando `to` passa da última cotação, o período termina na última cotação publicada e a resposta
+devolve a data efetiva usada (`effectiveTo`), em vez de erro: no CDI, o dia útil seguinte à última
+cotação (o fim é exclusivo); no IPCA, o último dia do último mês publicado. Sem corte,
+`effectiveTo` é igual a `to`. No IPCA as comparações são por mês de competência e o calendário não
+é consultado. Lacuna anterior à última cotação continua sendo falha de importação. `from`
+posterior a `to`, ou um período sem nenhuma cotação publicada, é 400: no CDI, nenhum dia útil em
+`[from, effectiveTo)`; no IPCA, o mês de `from` posterior ao último publicado. No CDI, `from`
+igual a `to` é 400 com mensagem própria de período vazio (o fim exclusivo pede `to` posterior a
+`from`), mesmo num dia com cotação; no IPCA, é a variação do mês. O acumulado do IPCA
+usa meses cheios e por isso não fecha com o valor bruto de um título IPCA+, que usa pro rata; o do
+CDI fecha com o de um título 100% do CDI.
+
+**RN-14 — Projeção por título** (v2, F12). A projeção de um título reúne as projeções dos seus
+aportes, com as mesmas regras de data do consolidado: sem `referenceDate`, vale a data padrão,
+e o aporte posterior a ela é projetado na própria data do aporte; com data informada, os
+aportes posteriores a ela ficam de fora. Os totais seguem a RN-07: são a soma dos itens já
+arredondados, e o líquido é o bruto menos o IR menos o IOF. Um título sem aportes incluídos
+responde 200, com totais zero, lista vazia e `referenceDate` presente. Título inexistente é
+404. Os aportes saem na ordem do consolidado, o mais recente primeiro, sem garantia entre aportes do
+mesmo dia.
+
 ## Endpoints
 
 | Método | Rota | Descrição |
@@ -197,11 +260,16 @@ valores já arredondados.
 | GET | `/api/positions/{id}/projection?referenceDate=` | Projeção da posição |
 | GET | `/api/portfolio/summary?referenceDate=` | Consolidado da carteira |
 | GET | `/api/indexes/{indexType}?from=&to=` | Cotações de um indexador no período (v2) |
+| GET | `/api/indexes/{indexType}/accumulated?from=&to=` | Variação acumulada de um indexador no período (v2, F12, RN-13) |
+| GET | `/api/assets/{id}/projection?referenceDate=` | Projeção consolidada de um título e dos seus aportes (v2, F12, RN-14) |
 | GET | `/health` | Liveness, texto `Healthy`, fora do envelope `ApiResponse<T>` (v2, F8) |
 
 A projeção retorna valor investido, valor bruto, rendimento, alíquota aplicada, imposto
 devido e valor líquido. Na v2, retorna também alíquota e valor de IOF, e indica se a projeção
-é estimada (RN-10).
+é estimada (RN-10). A partir da F12, indica também se usa taxas projetadas (`isProjected`,
+RN-12). As mudanças da F12 no contrato são só aditivas: nenhum campo existente muda de nome ou de
+tipo. O que muda de valor são as duas consequências da RN-12 (IPCA+ no mês de hoje e data
+informada depois da última cotação de CDI).
 
 A projeção devolve também `referenceDate`, a data pedida (a informada ou a padrão resolvida,
 descrita abaixo), e `applicationDate`, a data do aporte. Numa posição vencida, `referenceDate`
@@ -212,7 +280,9 @@ Na v2, quando `referenceDate` é omitida na projeção ou no consolidado, a data
 útil seguinte à última cotação de CDI importada, e não a data de hoje, para a consulta padrão
 não falhar por falta da cotação de ontem. No consolidado, uma posição com aporte posterior a
 essa data é projetada na própria data do aporte (rendimento zero, sem exigir cotação). Data
-informada explicitamente e sem cotação continua sendo erro (RN-09). No consolidado com data
+informada explicitamente com dia sem cotação anterior à última cotação continua sendo erro (RN-09);
+depois da última cotação, vale a RN-12 (projetado a partir do dia útil anterior a hoje, erro antes
+dele). No consolidado com data
 informada, as posições aportadas depois dela ficam fora do resumo. A data de "hoje" usada
 quando não há nenhuma cotação de CDI é a de Brasília (`America/Sao_Paulo`). O registro de aporte
 com data fora do período coberto pelo calendário (RN-08) é rejeitado com 400.
@@ -287,6 +357,7 @@ São regras que independem de orquestração e precisam ser testáveis sem infra
 | Regras de arquitetura (v2) | NetArchTest.Rules |
 | Mutation testing (v2) | Stryker.NET no Domain, com limite de 80% (`break`), em workflow separado (`mutation.yml`: semanal e sob demanda, fora do CI de cada push) |
 | Navegação do código | graphify, com o grafo local em `graphify-out/`, fora do versionamento |
+| Projeção futura (v2, F12) | Taxa constante: o último CDI diário publicado e, no IPCA, a média geométrica dos últimos 12 meses (decisão de 26/11/2026). As expectativas do Boletim Focus ficaram de fora por exigirem mais uma fonte externa |
 
 Padrões mantidos do projeto: controller herda `ControllerBase` e retorna
 `StatusCode(response.StatusCode, response)`; respostas encapsuladas em `ApiResponse<T>`;
@@ -349,6 +420,11 @@ eventos com outbox. Só entra se as vagas-alvo pedirem.
 **F11 — Nuvem na AWS.** Terraform de um ambiente efêmero na AWS (ECS Fargate, ALB e RDS
 PostgreSQL), validado primeiro no emulador Floci e depois subido só durante uma demo, com
 prazo de validade e destruição automática. Não depende da F10, que é opcional.
+
+**F12 — Contrato v2 para o front.** O que o front `renda-fixa-web` precisa para mostrar o valor
+no vencimento, o CDI e a inflação acumulados e o total de cada título sem calcular dinheiro no
+navegador: RN-12 a RN-14, com os dois endpoints novos e o campo `isProjected`. Depende da F9. A
+validação ao vivo da F11 foi adiada pelo Matheus e não bloqueia a F12 (decisão de 26/11/2026).
 
 Passos e critérios de cada fase da v2 estão em `docs/ROADMAP.md`. O detalhamento de execução
 fica em `docs/SPEC-Fx-EXECUCAO.md`, escrito no começo de cada fase.

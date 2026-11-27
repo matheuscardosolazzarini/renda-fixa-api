@@ -1,10 +1,10 @@
 # Roadmap v2 — renda-fixa-api
 
-Atualizado em 19/11/2026.
+Atualizado em 26/11/2026.
 
 ## Objetivo
 
-A v1 (F1 a F6) entregou a API com taxas fixas no `appsettings.json`. A v2 dá o próximo passo: o sistema passa a usar dados de mercado reais, publica sozinho uma imagem testada e ganha testes que provam que os cálculos estão certos. A numeração continua a da v1. A ordem é F7, depois F8, depois F9. A F10 é opcional. A F11 (nuvem na AWS) vem depois da F9 e não depende da F10.
+A v1 (F1 a F6) entregou a API com taxas fixas no `appsettings.json`. A v2 dá o próximo passo: o sistema passa a usar dados de mercado reais, publica sozinho uma imagem testada e ganha testes que provam que os cálculos estão certos. A numeração continua a da v1. A ordem é F7, depois F8, depois F9. A F10 é opcional. A F11 (nuvem na AWS) vem depois da F9 e não depende da F10. A F12 (contrato v2 para o front) também depende só da F9.
 
 Como usar este roadmap:
 
@@ -14,7 +14,7 @@ Como usar este roadmap:
 
 ## Como executar uma fase
 
-No Claude Code, rode `/executar-fase F7` (ou F8, F9, F10, F11). O comando, em `.claude/commands/executar-fase.md`, coordena quatro agentes de `.claude/agents/`:
+No Claude Code, rode `/executar-fase F7` (ou F8, F9, F10, F11, F12). O comando, em `.claude/commands/executar-fase.md`, coordena quatro agentes de `.claude/agents/`:
 
 | Agente | Papel |
 |---|---|
@@ -35,10 +35,12 @@ flowchart TD
     F9["<b>F9 · Qualidade</b><br/>Testcontainers, NetArchTest e Stryker.NET"]
     F10["<b>F10 · Observabilidade, cache, eventos</b><br/>Opcional: OpenTelemetry, Redis e outbox"]
     F11["<b>F11 · Nuvem na AWS</b><br/>Terraform, ambiente efêmero e Floci"]
+    F12["<b>F12 · Contrato v2 para o front</b><br/>projeção futura, acumulado e projeção por título"]
     F7 -- "CDB 100% CDI bate com a Calculadora do Cidadão (± R$ 0,01)" --> F8
     F8 -- "merge na main publica imagem testada sem passo manual" --> F9
     F9 -- "integração no CI e mutation score do Domain ≥ 80%" --> F10
     F9 --> F11
+    F9 --> F12
     style F10 stroke-dasharray: 5 5
 ```
 
@@ -272,6 +274,58 @@ Ao vivo (só marcados com evidência):
 - [ ] Custo bruto das subidas conferido no Cost Explorer e registrado
 - [ ] A conta continua no Free account plan ao fim da fase
 
+## F12 — Contrato v2 para o front
+
+Decisão de 26/11/2026: o front `renda-fixa-web` foi redesenhado para um público leigo e passou a
+mostrar o valor no vencimento, o CDI e a inflação acumulados e o total de cada título. Sem
+mudança na API, o front teria de calcular dinheiro, o que a D-07 da arquitetura dele proíbe. A
+F12 entrega esses dados prontos. A validação ao vivo da F11 fica adiada e não bloqueia esta
+fase.
+
+### Antes de começar
+
+- [x] RN-12 a RN-14, os dois endpoints novos e a F12 registrados em `ESPECIFICACAO.md`, com a
+  decisão da projeção futura na tabela de decisões técnicas
+- [x] `/executar-fase` aceita a F12 com a F9 como fase anterior
+
+### Passos
+
+1. RN-12: carregamento de mercado com taxas projetadas depois da última cotação (CDI constante e
+   IPCA pela média geométrica de 12 meses) e `isProjected` na projeção, no consolidado e nos
+   itens do consolidado.
+2. RN-13: `GET /api/indexes/{indexType}/accumulated`, com `effectiveTo`.
+3. RN-14: `GET /api/assets/{id}/projection`, com totais pela RN-07 e a lista de aportes.
+4. Swagger, teste do `swagger.json`, `FixedIncome.Api.http` e README.
+
+### Critérios de conclusão
+
+- [x] A projeção de um CDB 100% do CDI com data futura bate com o caso de referência do
+  `especialista-renda-fixa`, calculado com a última taxa diária (casos 1, 1-bis, 2, 3, 3-bis e
+  3-ter em `PositionCdiFutureProjectionTests`; smoke com bruto recalculado por fora)
+- [x] A projeção de um IPCA+ com data futura usa a média geométrica de 12 meses e bate com o caso
+  de referência; mês encerrado e não divulgado continua com `isEstimated` (casos 6 e 6-bis,
+  1.025,42 e 1.030,01, com as duas marcas verdadeiras)
+- [x] Lacuna de cotação anterior à última cotação continua 400, e data posterior à cobertura do
+  calendário também (testes de Domain, Application e Api; smoke com lacuna, importação parada e
+  data em 2051)
+- [x] O CDI acumulado de um período bate com a Calculadora do Cidadão do Banco Central, com
+  diferença de no máximo R$ 0,01 sobre R$ 1.000 (01/09 a 01/10/2026: 1,01081673 e R$ 1.010,82,
+  diferença R$ 0,00; outros cinco períodos na validação e no QA, todos com R$ 0,00)
+- [x] Acumulado com `to` posterior à última cotação devolve `effectiveTo` em vez de erro
+- [x] Na projeção por título, os totais são iguais à soma dos itens; título sem aportes responde
+  200 com zeros, e título inexistente responde 404
+- [x] Só aditivo: o teste do `swagger.json` mostra os campos e endpoints novos e nenhum campo
+  existente alterado (lista fechada com tipo e formato da projeção e do resumo)
+- [x] `dotnet build` sem warning e `dotnet test` verde, com 712 testes ou mais (863)
+- [x] Mutation score do Domain continua em 80% ou mais (96,96%)
+
+Status: **concluída** em 27/11/2026, ainda sem commit (863 testes, antes 712;
+`docs/SPEC-F12-EXECUCAO.md`, `docs/VALIDACAO-F12.md`, `docs/QA-F12.md`). A regra de 7 casas do
+fator do IPCA no acumulado (D-10) reproduziu a Calculadora do Cidadão em 17 de 17 períodos, mas
+segue inferida das saídas dela, não de metodologia publicada pelo BC. O QA não achou bug; dos 11
+riscos, todos de severidade baixa, os riscos 4, 5 e 7 foram corrigidos antes do commit e os outros oito
+ficam registrados em `docs/QA-F12.md`.
+
 ## Definição de pronto (vale para toda tarefa)
 
 Uma tarefa só está concluída quando passa nos sete pontos abaixo, além dos critérios da fase.
@@ -290,4 +344,5 @@ O núcleo da v2 está entregue: F7, F8 e F9 concluídas, com as pendências herd
 
 - **F10 — Observabilidade, cache e eventos (opcional).** Continua valendo o critério de entrar só se as vagas pedirem. Como a nuvem está adiada, o Application Insights não tem onde rodar: antes de começar, trocar o destino da telemetria por algo que rode local (um coletor OpenTelemetry com visualizador em contêiner no Compose) e reescrever o primeiro e o segundo critérios de conclusão da F10 para esse destino. A troca entra como item de "Decisões em aberto" da `ESPECIFICACAO.md` e precisa estar fechada antes de rodar `/executar-fase F10`.
 - **Teste de segurança.** Avaliar a API rodando, do lado de fora, além das auditorias de workflow (`actionlint` e `zizmor`) que já existem.
-- **F11 — Nuvem na AWS.** Spec aprovada em 19/11/2026 (`docs/SPEC-F11-EXECUCAO.md`). Próximo passo: `/executar-fase F11`.
+- **F11 — Nuvem na AWS.** Implementada e mergeada (PR #19). Falta criar a conta (P0) e a validação ao vivo (P8), adiadas pelo Matheus em 26/11/2026.
+- **F12 — Contrato v2 para o front.** Concluída em 27/11/2026 (`docs/VALIDACAO-F12.md`). Falta o commit e o PR. Os riscos 4, 5 e 7 do QA foram corrigidos; os outros oito, de severidade baixa (`docs/QA-F12.md`), ficam para decisão do Matheus.

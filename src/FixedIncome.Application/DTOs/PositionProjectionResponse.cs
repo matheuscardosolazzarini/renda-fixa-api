@@ -17,7 +17,8 @@ public record PositionProjectionResponse(
     decimal IofAmount,
     bool IsEstimated,
     DateOnly ReferenceDate,
-    DateOnly ApplicationDate)
+    DateOnly ApplicationDate,
+    bool IsProjected)
 {
     public static PositionProjectionResponse FromProjection(
         Guid positionId,
@@ -39,5 +40,6 @@ public record PositionProjectionResponse(
         projection.IofAmount,
         projection.IsEstimated,
         referenceDate,
-        applicationDate);
+        applicationDate,
+        projection.IsProjected);
 }

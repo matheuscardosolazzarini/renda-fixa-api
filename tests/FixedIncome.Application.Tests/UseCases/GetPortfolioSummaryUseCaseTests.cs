@@ -401,8 +401,12 @@ public class GetPortfolioSummaryUseCaseTests
         var useCase = new GetPortfolioSummaryUseCase(
             new PositionRepositoryStub(new[] { position }),
             new FixedIncomeAssetRepositoryStub(Array.Empty<FixedIncomeAsset>()),
-            new MarketDataLoader(new HolidayRepositoryStub(Array.Empty<Holiday>()), new IndexRateRepositoryStub(Array.Empty<IndexRate>())),
-            new TimeProviderStub(Now));
+            new PositionProjector(
+                new MarketDataLoader(
+                    new HolidayRepositoryStub(Array.Empty<Holiday>()),
+                    new IndexRateRepositoryStub(Array.Empty<IndexRate>()),
+                    new TimeProviderStub(Now)),
+                new TimeProviderStub(Now)));
 
         // Act
         var response = await useCase.ExecuteAsync(asset.IssueDate.AddDays(30));
@@ -424,8 +428,7 @@ public class GetPortfolioSummaryUseCaseTests
         var useCase = new GetPortfolioSummaryUseCase(
             new PositionRepositoryStub(positions),
             assetRepository,
-            CriarLoader(),
-            new TimeProviderStub(Now));
+            new PositionProjector(CriarLoader(), new TimeProviderStub(Now)));
 
         // Act
         var response = await useCase.ExecuteAsync(asset.IssueDate.AddDays(30));
@@ -846,14 +849,228 @@ public class GetPortfolioSummaryUseCaseTests
         AssertFechamento(response.Data!);
     }
 
+    // F12, RN-12 e D-6: a raiz é verdadeira se algum item for projetado. Caso 1 da spec: CDB 100% do CDI
+    // de R$ 1.000 (aplicação 2026-11-16, referência 2026-11-26, hoje 2026-11-19, cotação de 0,050788%
+    // em 16 a 19/11), bruto 1.003,56 e líquido 1.000,94. O CDB pré-fixado do mesmo dia não é projetado.
+    [Fact]
+    public async Task Data_futura_com_cdi_projetado_marca_o_item_e_a_raiz_e_deixa_o_prefixado_sem_marca()
+    {
+        // Arrange
+        var cdiAsset = CriarAsset(AssetType.Cdb, IndexType.Cdi, rate: 100m, name: "CDB CDI");
+        var preFixedAsset = CriarAsset(AssetType.Cdb, IndexType.PreFixed, rate: 10m, name: "CDB Pré");
+        var cdiPosition = new Position(cdiAsset, 1_000m, new DateOnly(2026, 11, 16));
+        var preFixedPosition = new Position(preFixedAsset, 1_000m, new DateOnly(2026, 11, 16));
+        var useCase = CriarCasoDe2026(
+            new[] { cdiPosition, preFixedPosition }, new[] { cdiAsset, preFixedAsset },
+            new DateOnly(2026, 11, 19), CdiDoCaso1());
+
+        // Act
+        var response = await useCase.ExecuteAsync(new DateOnly(2026, 11, 26));
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.True(response.Data!.IsProjected);
+
+        var cdiItem = response.Data!.Positions.Single(p => p.Projection.PositionId == cdiPosition.Id).Projection;
+        Assert.True(cdiItem.IsProjected);
+        Assert.Equal(1_003.56m, cdiItem.GrossAmount);
+        Assert.Equal(1_000.94m, cdiItem.NetAmount);
+
+        var preFixedItem = response.Data!.Positions.Single(p => p.Projection.PositionId == preFixedPosition.Id).Projection;
+        Assert.False(preFixedItem.IsProjected);
+        AssertFechamento(response.Data!);
+    }
+
+    // Caso 6 da spec (IPCA+ 6%, aplicação 2026-10-01, referência 2026-12-15, hoje 2026-11-05): o item
+    // sai com as duas marcas e a raiz com isProjected; isEstimated continua só no item.
+    [Fact]
+    public async Task Data_futura_com_ipca_marca_o_item_como_estimado_e_projetado_e_a_raiz_como_projetada()
+    {
+        // Arrange
+        var asset = CriarAsset(AssetType.Cdb, IndexType.Ipca, rate: 6m);
+        var position = new Position(asset, 1_000m, new DateOnly(2026, 10, 1));
+        var useCase = CriarCasoDe2026(
+            new[] { position }, new[] { asset }, new DateOnly(2026, 11, 5), IpcaDoCaso6());
+
+        // Act
+        var response = await useCase.ExecuteAsync(new DateOnly(2026, 12, 15));
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.True(response.Data!.IsProjected);
+        var item = Assert.Single(response.Data!.Positions).Projection;
+        Assert.True(item.IsEstimated);
+        Assert.True(item.IsProjected);
+        Assert.Equal(1_025.42m, item.GrossAmount);
+        Assert.Equal(5.72m, item.TaxAmount);
+        Assert.Equal(1_019.70m, item.NetAmount);
+        Assert.Equal(1_025.42m, response.Data!.TotalGrossAmount);
+    }
+
+    [Fact]
+    public async Task Sem_data_a_raiz_do_resumo_com_cdi_so_publicado_nao_marca_is_projected()
+    {
+        // Arrange: a data padrão (23/11) é o dia útil seguinte à última cotação, com fim exclusivo.
+        var asset = CriarAsset(AssetType.Cdb, IndexType.Cdi, rate: 100m);
+        var position = new Position(asset, 1_000m, new DateOnly(2026, 11, 16));
+        var useCase = CriarCasoDe2026(
+            new[] { position }, new[] { asset }, new DateOnly(2026, 11, 19), CdiDoCaso1());
+
+        // Act
+        var response = await useCase.ExecuteAsync(referenceDate: null);
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.False(response.Data!.IsProjected);
+        Assert.False(Assert.Single(response.Data!.Positions).Projection.IsProjected);
+    }
+
+    // Mudança de comportamento 1 no resumo: hoje 2026-11-05, data padrão 2026-11-05, IPCA+ aplicado em
+    // 2026-11-03 com 2 dias úteis de novembro: projetado e não estimado, bruto 1.000,85.
+    [Fact]
+    public async Task Sem_data_o_ipca_mais_com_dia_util_no_mes_de_hoje_marca_o_item_e_a_raiz_como_projetados()
+    {
+        // Arrange
+        var asset = CriarAsset(AssetType.Cdb, IndexType.Ipca, rate: 6m);
+        var position = new Position(asset, 1_000m, new DateOnly(2026, 11, 3));
+        var useCase = CriarCasoDe2026(
+            new[] { position }, new[] { asset }, new DateOnly(2026, 11, 5),
+            IpcaDoCaso6().Append(new IndexRate(IndexType.Cdi, new DateOnly(2026, 11, 4), 0.05m)).ToArray());
+
+        // Act
+        var response = await useCase.ExecuteAsync(referenceDate: null);
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.Equal(new DateOnly(2026, 11, 5), response.Data!.ReferenceDate);
+        Assert.True(response.Data!.IsProjected);
+        var item = Assert.Single(response.Data!.Positions).Projection;
+        Assert.True(item.IsProjected);
+        Assert.False(item.IsEstimated);
+        Assert.Equal(1_000.85m, item.GrossAmount);
+    }
+
+    [Fact]
+    public async Task Referencia_no_primeiro_dia_util_do_mes_de_hoje_nao_projeta_o_resumo_e_nao_exige_os_12_meses_de_ipca()
+    {
+        // Arrange: referência 03/11 (02/11 é feriado) com fim exclusivo: nenhum dia de novembro entra;
+        // só 2 meses de IPCA; outubro é estimado, bruto 1.013,11.
+        var asset = CriarAsset(AssetType.Cdb, IndexType.Ipca, rate: 6m);
+        var position = new Position(asset, 1_000m, new DateOnly(2026, 10, 1));
+        var useCase = CriarCasoDe2026(
+            new[] { position }, new[] { asset }, new DateOnly(2026, 11, 5),
+            new IndexRate(IndexType.Ipca, new DateOnly(2026, 8, 1), -0.32m),
+            new IndexRate(IndexType.Ipca, new DateOnly(2026, 9, 1), 0.82m));
+
+        // Act
+        var response = await useCase.ExecuteAsync(new DateOnly(2026, 11, 3));
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.False(response.Data!.IsProjected);
+        var item = Assert.Single(response.Data!.Positions).Projection;
+        Assert.False(item.IsProjected);
+        Assert.True(item.IsEstimated);
+        Assert.Equal(1_013.11m, item.GrossAmount);
+    }
+
+    [Fact]
+    public async Task Sem_data_com_menos_de_12_meses_de_ipca_e_dia_util_no_mes_de_hoje_retorna_400_com_a_mensagem_da_janela()
+    {
+        // Arrange: 11 meses de IPCA (11/2025 a 09/2026); a janela vai de 10/2025 a 09/2026.
+        var asset = CriarAsset(AssetType.Cdb, IndexType.Ipca, rate: 6m);
+        var position = new Position(asset, 1_000m, new DateOnly(2026, 11, 3));
+        var useCase = CriarCasoDe2026(
+            new[] { position }, new[] { asset }, new DateOnly(2026, 11, 5),
+            IpcaDoCaso6().Skip(1).Append(new IndexRate(IndexType.Cdi, new DateOnly(2026, 11, 4), 0.05m)).ToArray());
+
+        // Act
+        var response = await useCase.ExecuteAsync(referenceDate: null);
+
+        // Assert
+        Assert.Equal(400, response.StatusCode);
+        Assert.Equal(
+            "A projeção futura do IPCA exige os 12 meses de 2025-10 a 2026-09; há 11, falta 2025-10.",
+            response.Message);
+    }
+
+    [Fact]
+    public async Task Data_futura_de_ipca_com_lacuna_na_janela_de_12_meses_retorna_400_com_o_primeiro_mes_ausente()
+    {
+        // Arrange: a janela 10/2025 a 09/2026 tem 11 meses, sem 02/2026.
+        var asset = CriarAsset(AssetType.Cdb, IndexType.Ipca, rate: 6m);
+        var position = new Position(asset, 1_000m, new DateOnly(2026, 10, 1));
+        var useCase = CriarCasoDe2026(
+            new[] { position }, new[] { asset }, new DateOnly(2026, 11, 5),
+            IpcaDoCaso6().Where(rate => rate.ReferenceDate != new DateOnly(2026, 2, 1)).ToArray());
+
+        // Act
+        var response = await useCase.ExecuteAsync(new DateOnly(2026, 12, 15));
+
+        // Assert
+        Assert.Equal(400, response.StatusCode);
+        Assert.Equal(
+            "A projeção futura do IPCA exige os 12 meses de 2025-10 a 2026-09; há 11, falta 2026-02.",
+            response.Message);
+    }
+
+    // Fronteira da mudança de comportamento 2 (caso 3-bis): última cotação em 19/11 e 20/11 feriado.
+    // Hoje 24/11: a última cotação é de dois dias úteis antes, e nenhum dia sem cotação fica antes do
+    // dia útil anterior a hoje (23/11).
+    [Fact]
+    public async Task Ultima_cotacao_de_cdi_dois_dias_uteis_antes_de_hoje_projeta_o_resumo_na_data_informada()
+    {
+        // Arrange
+        var asset = CriarAsset(AssetType.Cdb, IndexType.Cdi, rate: 100m);
+        var position = new Position(asset, 1_000m, new DateOnly(2026, 11, 16));
+        var useCase = CriarCasoDe2026(
+            new[] { position }, new[] { asset }, new DateOnly(2026, 11, 24), CdiDoCaso1());
+
+        // Act
+        var response = await useCase.ExecuteAsync(new DateOnly(2026, 11, 26));
+
+        // Assert: os mesmos valores do caso 1.
+        Assert.Equal(200, response.StatusCode);
+        Assert.True(response.Data!.IsProjected);
+        var item = Assert.Single(response.Data!.Positions).Projection;
+        Assert.True(item.IsProjected);
+        Assert.Equal(1_003.56m, item.GrossAmount);
+        Assert.Equal(1_000.94m, item.NetAmount);
+    }
+
+    // Hoje 25/11: 23/11 ficou sem cotação antes do dia útil anterior a hoje (24/11).
+    [Fact]
+    public async Task Ultima_cotacao_de_cdi_tres_dias_uteis_antes_de_hoje_retorna_400_com_a_posicao_o_titulo_e_o_aviso_da_importacao()
+    {
+        // Arrange
+        var asset = CriarAsset(AssetType.Cdb, IndexType.Cdi, rate: 100m);
+        var position = new Position(asset, 1_000m, new DateOnly(2026, 11, 16));
+        var useCase = CriarCasoDe2026(
+            new[] { position }, new[] { asset }, new DateOnly(2026, 11, 25), CdiDoCaso1());
+
+        // Act
+        var response = await useCase.ExecuteAsync(new DateOnly(2026, 11, 26));
+
+        // Assert
+        Assert.Equal(400, response.StatusCode);
+        Assert.Equal(
+            $"Posição {position.Id} (título 'Título Teste'): Cotação de CDI ausente para 2026-11-23. "
+            + "A importação de cotações pode estar desligada (IndexRatesImport:Enabled) ou ainda não ter rodado.",
+            response.Message);
+    }
+
     private static GetPortfolioSummaryUseCase CriarCasoComCalendarioVazio(
         IEnumerable<Position> positions, IEnumerable<FixedIncomeAsset> assets, params IndexRate[] rates)
     {
         return new GetPortfolioSummaryUseCase(
             new PositionRepositoryStub(positions),
             new FixedIncomeAssetRepositoryStub(assets),
-            new MarketDataLoader(new HolidayRepositoryStub(Array.Empty<Holiday>()), new IndexRateRepositoryStub(rates)),
-            new TimeProviderStub(Now));
+            new PositionProjector(
+                new MarketDataLoader(
+                    new HolidayRepositoryStub(Array.Empty<Holiday>()),
+                    new IndexRateRepositoryStub(rates),
+                    new TimeProviderStub(Now)),
+                new TimeProviderStub(Now)));
     }
 
     private static GetPortfolioSummaryUseCase CriarCaso(
@@ -868,12 +1085,11 @@ public class GetPortfolioSummaryUseCaseTests
         return new GetPortfolioSummaryUseCase(
             new PositionRepositoryStub(positions),
             new FixedIncomeAssetRepositoryStub(assets),
-            CriarLoader(rates),
-            clock);
+            new PositionProjector(CriarLoader(rates), clock));
     }
 
     private static MarketDataLoader CriarLoader(params IndexRate[] rates) =>
-        new(new HolidayRepositoryStub(TestMarket.Holidays()), new IndexRateRepositoryStub(rates));
+        new(new HolidayRepositoryStub(TestMarket.Holidays()), new IndexRateRepositoryStub(rates), new TimeProviderStub(Now));
 
     private static FixedIncomeAsset CriarAsset(
         AssetType assetType, IndexType indexType = IndexType.PreFixed, decimal rate = 10m,
@@ -908,8 +1124,44 @@ public class GetPortfolioSummaryUseCaseTests
         return new GetPortfolioSummaryUseCase(
             new PositionRepositoryStub(positions),
             new FixedIncomeAssetRepositoryStub(assets),
-            new MarketDataLoader(new HolidayRepositoryStub(holidays), new IndexRateRepositoryStub(rates)),
-            new TimeProviderStub(Now));
+            new PositionProjector(
+                new MarketDataLoader(
+                new HolidayRepositoryStub(holidays),
+                new IndexRateRepositoryStub(rates),
+                // Novembro/2026: outubro está encerrado e não divulgado, então é estimado (RN-10) e não
+                // projetado (RN-12); com o relógio do arquivo (2025-12-01) virava projetado.
+                new TimeProviderStub(new DateTimeOffset(2026, 11, 5, 15, 0, 0, TimeSpan.Zero))),
+                new TimeProviderStub(Now)));
+    }
+
+    // Calendário com os feriados de 2026 e relógio fixo no dia dado: o mesmo TimeProvider no carregador
+    // (fronteiras da RN-12) e no caso de uso (data padrão).
+    private static GetPortfolioSummaryUseCase CriarCasoDe2026(
+        IEnumerable<Position> positions, IEnumerable<FixedIncomeAsset> assets, DateOnly today, params IndexRate[] rates)
+    {
+        var clock = new TimeProviderStub(new DateTimeOffset(today.Year, today.Month, today.Day, 15, 0, 0, TimeSpan.Zero));
+        var loader = new MarketDataLoader(
+            new HolidayRepositoryStub(TestMarket.HolidaysWith2026()), new IndexRateRepositoryStub(rates), clock);
+
+        return new GetPortfolioSummaryUseCase(
+            new PositionRepositoryStub(positions), new FixedIncomeAssetRepositoryStub(assets), new PositionProjector(loader, clock));
+    }
+
+    // Série 12 do SGS cortada em 19/11/2026 (caso 1 da spec): 0,050788% ao dia em 16, 17, 18 e 19/11.
+    private static IndexRate[] CdiDoCaso1() =>
+        Enumerable.Range(16, 4)
+            .Select(day => new IndexRate(IndexType.Cdi, new DateOnly(2026, 11, day), 0.050788m))
+            .ToArray();
+
+    // Série 433 de 10/2025 a 09/2026 (caso 6 da spec); último publicado: 09/2026.
+    private static IndexRate[] IpcaDoCaso6()
+    {
+        decimal[] values = [0.09m, 0.18m, 0.33m, 0.33m, 0.70m, 0.88m, 0.67m, 0.58m, 0.16m, 0.07m, -0.32m, 0.82m];
+        var first = new DateOnly(2025, 10, 1);
+
+        return values
+            .Select((value, index) => new IndexRate(IndexType.Ipca, first.AddMonths(index), value))
+            .ToArray();
     }
 
     private sealed class TimeProviderStub : TimeProvider

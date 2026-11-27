@@ -14,6 +14,20 @@ public static class TestMarket
         "2025-12-25"
     ];
 
+    // Feriados de 2026 que caem nos intervalos dos casos de referência da F12 (12/10, 02/11, 20/11 e
+    // 25/12), para os testes de projeção com data futura.
+    private static readonly string[] Holidays2026 = ["2026-10-12", "2026-11-02", "2026-11-20", "2026-12-25"];
+
+    // Os mesmos de Holidays() mais os de 2026.
+    public static IReadOnlyList<Holiday> HolidaysWith2026()
+    {
+        return Holidays2025
+            .Concat(Holidays2026)
+            .Append("2030-12-25")
+            .Select(date => new Holiday(DateOnly.Parse(date), "Feriado nacional"))
+            .ToList();
+    }
+
     public static IReadOnlyList<Holiday> Holidays()
     {
         return Holidays2025

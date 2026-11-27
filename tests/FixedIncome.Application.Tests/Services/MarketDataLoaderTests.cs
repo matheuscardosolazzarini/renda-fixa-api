@@ -23,7 +23,7 @@ public class MarketDataLoaderTests
     }
 
     [Fact]
-    public async Task Carrega_o_cdi_do_periodo_com_as_duas_pontas_inclusivas_e_nada_alem_delas()
+    public async Task Carrega_o_cdi_do_periodo_com_as_duas_pontas_inclusivas_e_alem_delas_so_a_ultima_cotacao()
     {
         // Arrange
         var loader = CriarLoader(
@@ -31,16 +31,19 @@ public class MarketDataLoaderTests
             new IndexRate(IndexType.Cdi, new DateOnly(2026, 9, 11), 0.051660m),
             new IndexRate(IndexType.Cdi, new DateOnly(2026, 9, 14), 0.051660m),
             new IndexRate(IndexType.Cdi, new DateOnly(2026, 9, 15), 0.051660m),
-            new IndexRate(IndexType.Cdi, new DateOnly(2026, 9, 16), 0.051660m));
+            new IndexRate(IndexType.Cdi, new DateOnly(2026, 9, 16), 0.051660m),
+            new IndexRate(IndexType.Cdi, new DateOnly(2026, 9, 17), 0.050788m));
 
         // Act
         var market = await loader.LoadAsync(new DateOnly(2026, 9, 14), new DateOnly(2026, 9, 15));
 
-        // Assert
+        // Assert: 11/09 e 16/09 estão fora do período e não são a última cotação; a última (17/09)
+        // entra sempre, pela D-1.
         Assert.Null(market.GetCdi(new DateOnly(2026, 9, 11)));
         Assert.Equal(0.051660m, market.GetCdi(new DateOnly(2026, 9, 14)));
         Assert.Equal(0.051660m, market.GetCdi(new DateOnly(2026, 9, 15)));
         Assert.Null(market.GetCdi(new DateOnly(2026, 9, 16)));
+        Assert.Equal(0.050788m, market.GetCdi(new DateOnly(2026, 9, 17)));
     }
 
     [Fact]
@@ -175,8 +178,83 @@ public class MarketDataLoaderTests
         Assert.Null(date);
     }
 
+    [Fact]
+    public async Task A_serie_inclui_a_ultima_cotacao_de_cdi_e_os_12_meses_de_ipca_mesmo_com_o_periodo_longe_deles()
+    {
+        // Arrange: CDI até 16/09 e IPCA de 07/2025 a 09/2026 (15 meses); o período é de janeiro/2026.
+        var loader = CriarLoader(
+            Feriados2026(),
+            Cdis("2026-09-11", "2026-09-14", "2026-09-15", "2026-09-16").Concat(IpcaMensal("2025-07-01", 15)).ToArray());
+
+        // Act
+        var market = await loader.LoadAsync(new DateOnly(2026, 1, 10), new DateOnly(2026, 1, 20));
+
+        // Assert: o CDI traz só a última cotação (D-1); o IPCA traz os 12 meses de 10/2025 a 09/2026
+        // e nada de 07/2025 a 09/2025, fora da janela e do período.
+        Assert.Null(market.GetCdi(new DateOnly(2026, 9, 15)));
+        Assert.NotNull(market.GetCdi(new DateOnly(2026, 9, 16)));
+        Assert.Equal((new DateOnly(2026, 9, 16), 0.051660m), market.LastCdi);
+        Assert.Null(market.GetIpca(new DateOnly(2025, 9, 1)));
+        Assert.NotNull(market.GetIpca(new DateOnly(2025, 10, 1)));
+        Assert.NotNull(market.GetIpca(new DateOnly(2026, 1, 1)));
+        Assert.NotNull(market.GetIpca(new DateOnly(2026, 9, 1)));
+        Assert.Equal(new DateOnly(2026, 9, 1), market.LastPublishedIpca!.Value.Month);
+        Assert.True(market.TryGetProjectedIpca(out _, out var failure), failure);
+    }
+
+    [Fact]
+    public async Task Periodo_sobreposto_a_janela_e_a_ultima_cotacao_nao_gera_cotacao_duplicada()
+    {
+        // Arrange: o período cobre a última cotação de CDI e parte da janela de IPCA; sem a
+        // deduplicação o MarketData lançaria DomainException de cotação duplicada.
+        var loader = CriarLoader(
+            Feriados2026(),
+            Cdis("2026-09-14", "2026-09-15", "2026-09-16").Concat(IpcaMensal("2025-10-01", 12)).ToArray());
+
+        // Act
+        var market = await loader.LoadAsync(new DateOnly(2026, 3, 15), new DateOnly(2026, 9, 16));
+
+        // Assert
+        Assert.Equal(0.051660m, market.GetCdi(new DateOnly(2026, 9, 16)));
+        Assert.Equal(0.30m, market.GetIpca(new DateOnly(2026, 3, 1)));
+        Assert.Equal(0.30m, market.GetIpca(new DateOnly(2025, 10, 1)));
+        Assert.True(market.TryGetProjectedIpca(out _, out var failure), failure);
+    }
+
+    [Fact]
+    public async Task O_dia_de_hoje_vem_do_time_provider_no_fuso_de_brasilia()
+    {
+        // Arrange: 06/11/2026 01:30 UTC é 05/11/2026 22:30 em Brasília (UTC-3).
+        var clock = new TimeProviderStub(new DateTimeOffset(2026, 11, 6, 1, 30, 0, TimeSpan.Zero));
+        var loader = CriarLoader(clock, Feriados2026());
+
+        // Act
+        var market = await loader.LoadAsync(new DateOnly(2026, 4, 1), new DateOnly(2026, 4, 30));
+
+        // Assert
+        Assert.Equal(new DateOnly(2026, 11, 5), market.Today);
+    }
+
+    private static IndexRate[] Cdis(params string[] dates) =>
+        dates.Select(date => new IndexRate(IndexType.Cdi, DateOnly.Parse(date), 0.051660m)).ToArray();
+
+    // IPCA mensal fixo de 0,30 a partir do mês informado, para testar só o que entra na série.
+    private static IndexRate[] IpcaMensal(string firstMonth, int months)
+    {
+        var start = DateOnly.Parse(firstMonth);
+
+        return Enumerable.Range(0, months)
+            .Select(i => new IndexRate(IndexType.Ipca, start.AddMonths(i), 0.30m))
+            .ToArray();
+    }
+
+    // Relógio padrão: 05/11/2026, depois dos meses de IPCA estimados pelos testes (até outubro/2026).
     private static MarketDataLoader CriarLoader(IReadOnlyList<Holiday> holidays, params IndexRate[] rates) =>
-        new(new HolidayRepositoryStub(holidays), new IndexRateRepositoryStub(rates));
+        CriarLoader(new TimeProviderStub(new DateTimeOffset(2026, 11, 5, 15, 0, 0, TimeSpan.Zero)), holidays, rates);
+
+    private static MarketDataLoader CriarLoader(
+        TimeProvider clock, IReadOnlyList<Holiday> holidays, params IndexRate[] rates) =>
+        new(new HolidayRepositoryStub(holidays), new IndexRateRepositoryStub(rates), clock);
 
     private static IReadOnlyList<Holiday> Feriados2026()
     {
@@ -189,6 +267,23 @@ public class MarketDataLoaderTests
         ];
 
         return dates.Select(date => new Holiday(DateOnly.Parse(date), "Feriado nacional")).ToList();
+    }
+
+    private sealed class TimeProviderStub : TimeProvider
+    {
+        private readonly DateTimeOffset _now;
+
+        public TimeProviderStub(DateTimeOffset now)
+        {
+            _now = now;
+        }
+
+        public override DateTimeOffset GetUtcNow() => _now;
+
+        // Brasília fixo em UTC-3 (sem horário de verão desde 2019), para os testes não
+        // dependerem do fuso nem do tzdata da máquina.
+        public override TimeZoneInfo LocalTimeZone { get; } = TimeZoneInfo.CreateCustomTimeZone(
+            "America/Sao_Paulo", TimeSpan.FromHours(-3), "Brasília", "Brasília");
     }
 
     private sealed class HolidayRepositoryStub : IHolidayRepository
