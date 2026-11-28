@@ -56,6 +56,7 @@ Accept: application/json
 
 ### Projeção do aporte
 # A resposta traz referenceDate (a data pedida) e applicationDate (a data do aporte).
+# Traz também netYield, nextTaxRate, nextTaxRateDate e iofFreeDate (F13, campos aditivos).
 GET {{FixedIncome.Api_HostAddress}}/api/positions/{{createPosition.response.body.$.data.id}}/projection?referenceDate=2026-06-01
 Accept: application/json
 
@@ -65,6 +66,7 @@ DELETE {{FixedIncome.Api_HostAddress}}/api/assets/{{createAsset.response.body.$.
 ### Resumo consolidado da carteira
 # A resposta traz referenceDate na raiz e positions: as posições incluídas, cada uma com
 # projection e asset. Com data informada, a posição aportada depois dela não aparece.
+# Traz também totalNetYield e byAsset (um item por título, F13, campos aditivos).
 GET {{FixedIncome.Api_HostAddress}}/api/portfolio/summary?referenceDate=2026-06-01
 Accept: application/json
 
@@ -161,6 +163,7 @@ GET {{FixedIncome.Api_HostAddress}}/api/assets/{{createCdiAsset.response.body.$.
 Accept: application/json
 
 ### Projeção por título com referenceDate
+# Traz também totalNetYield (F13).
 GET {{FixedIncome.Api_HostAddress}}/api/assets/{{createCdiAsset.response.body.$.data.id}}/projection?referenceDate=2026-09-23
 Accept: application/json
 

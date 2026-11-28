@@ -86,6 +86,25 @@ public class GetPositionProjectionUseCaseTests
     }
 
     [Fact]
+    public async Task Projecao_devolve_o_net_yield_como_liquido_menos_investido()
+    {
+        // Arrange: mesmo caso do teste anterior (caso 1a da spec da F13): líquido 1.002,67 sobre 1.000.
+        var asset = new FixedIncomeAsset(
+            "CDB Banco X", "Banco X", AssetType.Cdb, IndexType.PreFixed, 10m,
+            new DateOnly(2025, 1, 1), new DateOnly(2027, 1, 1));
+        var position = new Position(asset, 1_000m, new DateOnly(2025, 4, 1));
+        var useCase = CriarCaso(position, asset);
+
+        // Act
+        var response = await useCase.ExecuteAsync(position.Id, new DateOnly(2025, 4, 22));
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.Equal(2.67m, response.Data!.NetYield);
+        Assert.Equal(response.Data!.NetAmount - response.Data!.InvestedAmount, response.Data!.NetYield);
+    }
+
+    [Fact]
     public async Task Posicao_inexistente_retorna_404()
     {
         // Arrange
@@ -730,6 +749,27 @@ public class GetPositionProjectionUseCaseTests
         return values
             .Select((value, index) => new IndexRate(IndexType.Ipca, first.AddMonths(index), value))
             .ToArray();
+    }
+
+    [Fact]
+    public async Task Projecao_devolve_a_proxima_faixa_de_ir_e_o_fim_do_iof_do_caso_de_referencia()
+    {
+        // Arrange: caso 1a da spec da F13. Aporte em 2025-04-01, referência 2025-04-22 (d = 21):
+        // próxima faixa 20,0 em aporte + 181 e fim do IOF em aporte + 30.
+        var asset = new FixedIncomeAsset(
+            "CDB Banco X", "Banco X", AssetType.Cdb, IndexType.PreFixed, 10m,
+            new DateOnly(2025, 1, 1), new DateOnly(2027, 1, 1));
+        var position = new Position(asset, 1_000m, new DateOnly(2025, 4, 1));
+        var useCase = CriarCaso(position, asset);
+
+        // Act
+        var response = await useCase.ExecuteAsync(position.Id, new DateOnly(2025, 4, 22));
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.Equal(20.0m, response.Data!.NextTaxRate);
+        Assert.Equal(new DateOnly(2025, 9, 29), response.Data!.NextTaxRateDate);
+        Assert.Equal(new DateOnly(2025, 5, 1), response.Data!.IofFreeDate);
     }
 
     private static GetPositionProjectionUseCase CriarCaso(

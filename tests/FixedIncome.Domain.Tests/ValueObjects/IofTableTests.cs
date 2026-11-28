@@ -102,4 +102,18 @@ public class IofTableTests
         var exception = Assert.Throws<DomainException>(act);
         Assert.Contains("prazo decorrido não pode ser negativo", exception.Message);
     }
+
+    [Fact]
+    public void FreeFromDay_e_o_dia_30_cuja_aliquota_e_zero_e_o_anterior_ainda_paga()
+    {
+        // Arrange
+
+        // Act
+        var freeFromDay = IofTable.FreeFromDay;
+
+        // Assert
+        Assert.Equal(30, freeFromDay);
+        Assert.Equal(0m, IofTable.RateFor(freeFromDay));
+        Assert.Equal(3m, IofTable.RateFor(freeFromDay - 1));
+    }
 }

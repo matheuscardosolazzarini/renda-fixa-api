@@ -61,7 +61,8 @@ public class SwaggerContractTests(PostgreSqlFixture postgres) : ApiTestBase(post
                 "taxAmount: number/double", "netAmount: number/double", "elapsedDays: integer/int32",
                 "businessDays: integer/int32", "iofRate: number/double", "iofAmount: number/double",
                 "isEstimated: boolean", "referenceDate: string/date", "applicationDate: string/date",
-                "isProjected: boolean"
+                "isProjected: boolean", "netYield: number/double", "nextTaxRate: number/double",
+                "nextTaxRateDate: string/date", "iofFreeDate: string/date"
             ],
             Describe(projection));
 
@@ -73,10 +74,52 @@ public class SwaggerContractTests(PostgreSqlFixture postgres) : ApiTestBase(post
                 "totalIofAmount: number/double", "totalNetAmount: number/double",
                 "positionCount: integer/int32", "byAssetType: array<AssetTypeSummaryResponse>",
                 "referenceDate: string/date", "positions: array<PortfolioPositionResponse>",
-                "isProjected: boolean"
+                "isProjected: boolean", "totalNetYield: number/double", "byAsset: array<AssetSummaryResponse>"
             ],
             Describe(summary));
+
+        var assetSummary = schemas.GetProperty("AssetSummaryResponse").GetProperty("properties");
+        Assert.Equal(
+            [
+                "assetId: string/uuid", "positionCount: integer/int32",
+                "totalInvestedAmount: number/double", "totalGrossAmount: number/double",
+                "totalGrossYield: number/double", "totalTaxAmount: number/double",
+                "totalIofAmount: number/double", "totalNetAmount: number/double",
+                "totalNetYield: number/double"
+            ],
+            Describe(assetSummary));
     }
+
+    // Swashbuckle sem SupportNonNullableReferenceTypes marca como nullable todo Nullable<T> e toda
+    // propriedade de tipo referência. O conjunto fechado prova que nenhum campo existente virou anulável.
+    [Fact]
+    public async Task Swagger_mantem_fechado_o_conjunto_de_propriedades_anulaveis_de_cada_schema()
+    {
+        // Arrange: a API de teste no ar, sem dados cadastrados (o swagger independe deles).
+        // Act
+        var response = await Client.GetAsync("/swagger/v1/swagger.json");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = await ReadJsonAsync(response);
+        var schemas = json.RootElement.GetProperty("components").GetProperty("schemas");
+
+        Assert.Equal(
+            ["iofFreeDate", "nextTaxRate", "nextTaxRateDate"],
+            NullableProperties(schemas.GetProperty("PositionProjectionResponse")));
+        Assert.Equal(
+            ["byAsset", "byAssetType", "positions"],
+            NullableProperties(schemas.GetProperty("PortfolioSummaryResponse")));
+        Assert.Empty(NullableProperties(schemas.GetProperty("AssetSummaryResponse")));
+        Assert.Equal(["positions"], NullableProperties(schemas.GetProperty("AssetProjectionResponse")));
+    }
+
+    private static string[] NullableProperties(JsonElement schema) =>
+        schema.GetProperty("properties").EnumerateObject()
+            .Where(p => p.Value.TryGetProperty("nullable", out var nullable) && nullable.GetBoolean())
+            .Select(p => p.Name)
+            .Order()
+            .ToArray();
 
     // "nome: tipo/formato" de cada propriedade, na ordem do schema; array vira "array<schema do item>".
     private static string[] Describe(JsonElement properties) =>

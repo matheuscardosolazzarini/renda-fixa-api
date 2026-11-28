@@ -58,6 +58,27 @@ public class GetAssetProjectionUseCaseTests
     }
 
     [Fact]
+    public async Task Titulo_devolve_total_net_yield_igual_ao_liquido_menos_o_investido_e_a_soma_dos_itens()
+    {
+        // Arrange: mesmo caso 29 do primeiro teste. Cada item rende 2,67 líquidos, total 5,34.
+        var asset = CriarAsset();
+        var first = new Position(asset, 1_000m, new DateOnly(2025, 4, 1));
+        var second = new Position(asset, 1_000m, new DateOnly(2025, 4, 1));
+        var useCase = CriarCaso(new[] { first, second }, new[] { asset });
+
+        // Act
+        var response = await useCase.ExecuteAsync(asset.Id, new DateOnly(2025, 4, 22));
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        var data = response.Data!;
+        Assert.Equal(5.34m, data.TotalNetYield);
+        Assert.Equal(data.TotalNetAmount - data.TotalInvestedAmount, data.TotalNetYield);
+        Assert.Equal(data.Positions.Sum(p => p.NetYield), data.TotalNetYield);
+        Assert.All(data.Positions, item => Assert.Equal(2.67m, item.NetYield));
+    }
+
+    [Fact]
     public async Task Titulo_sem_aportes_com_data_informada_retorna_200_com_totais_zero_lista_vazia_e_a_data()
     {
         // Arrange
@@ -232,6 +253,7 @@ public class GetAssetProjectionUseCaseTests
         Assert.Equal(0m, data.TotalTaxAmount);
         Assert.Equal(0m, data.TotalIofAmount);
         Assert.Equal(0m, data.TotalNetAmount);
+        Assert.Equal(0m, data.TotalNetYield);
         Assert.Empty(data.Positions);
     }
 

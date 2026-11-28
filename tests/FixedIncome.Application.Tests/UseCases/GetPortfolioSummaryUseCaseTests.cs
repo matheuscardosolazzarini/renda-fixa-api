@@ -34,6 +34,31 @@ public class GetPortfolioSummaryUseCaseTests
     }
 
     [Fact]
+    public async Task Resumo_devolve_net_yield_nos_itens_e_total_net_yield_igual_ao_liquido_menos_o_investido()
+    {
+        // Arrange: caso 16 da spec da F13. LCI de R$ 1.500 (líquido 1.504,57; net yield 4,57) e dois
+        // aportes de R$ 1.000 no CDB (líquido 1.002,67 cada; net yield 2,67), referência 2025-04-22.
+        var cdb = CriarAsset(AssetType.Cdb, name: "CDB A");
+        var lci = CriarAsset(AssetType.Lci, name: "LCI B");
+        var lciPosition = new Position(lci, 1_500m, new DateOnly(2025, 4, 2));
+        var firstCdb = new Position(cdb, 1_000m, new DateOnly(2025, 4, 1));
+        var secondCdb = new Position(cdb, 1_000m, new DateOnly(2025, 4, 1));
+        var useCase = CriarCaso(new[] { lciPosition, firstCdb, secondCdb }, new[] { cdb, lci });
+
+        // Act
+        var response = await useCase.ExecuteAsync(new DateOnly(2025, 4, 22));
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        var data = response.Data!;
+        Assert.Equal(9.91m, data.TotalNetYield);
+        Assert.Equal(data.TotalNetAmount - data.TotalInvestedAmount, data.TotalNetYield);
+        Assert.Equal(data.Positions.Sum(p => p.Projection.NetYield), data.TotalNetYield);
+        Assert.Equal(4.57m, Assert.Single(data.Positions, p => p.Projection.PositionId == lciPosition.Id).Projection.NetYield);
+        Assert.Equal(2.67m, Assert.Single(data.Positions, p => p.Projection.PositionId == firstCdb.Id).Projection.NetYield);
+    }
+
+    [Fact]
     public async Task Carteira_vazia_retorna_200_com_resumo_zerado()
     {
         // Arrange
@@ -1059,6 +1084,246 @@ public class GetPortfolioSummaryUseCaseTests
             response.Message);
     }
 
+    [Fact]
+    public async Task Itens_do_resumo_levam_a_proxima_faixa_de_ir_e_o_fim_do_iof_de_cada_titulo()
+    {
+        // Arrange: caso 16 da spec da F13, referência 2025-04-22. Dois aportes de CDB em 2025-04-01
+        // (próxima faixa 20,0 em 2025-09-29, IOF zera em 2025-05-01) e uma LCI em 2025-04-02 (isenta
+        // de IR, sem próxima faixa; IOF zera em 2025-05-02).
+        var cdb = CriarAsset(AssetType.Cdb, name: "CDB A");
+        var lci = CriarAsset(AssetType.Lci, name: "LCI B");
+        var lciPosition = new Position(lci, 1_500m, new DateOnly(2025, 4, 2));
+        var firstCdb = new Position(cdb, 1_000m, new DateOnly(2025, 4, 1));
+        var secondCdb = new Position(cdb, 1_000m, new DateOnly(2025, 4, 1));
+        var useCase = CriarCaso(new[] { lciPosition, firstCdb, secondCdb }, new[] { cdb, lci });
+
+        // Act
+        var response = await useCase.ExecuteAsync(new DateOnly(2025, 4, 22));
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        var lciItem = Assert.Single(response.Data!.Positions, p => p.Projection.PositionId == lciPosition.Id).Projection;
+        Assert.Null(lciItem.NextTaxRate);
+        Assert.Null(lciItem.NextTaxRateDate);
+        Assert.Equal(new DateOnly(2025, 5, 2), lciItem.IofFreeDate);
+        var cdbItems = response.Data!.Positions.Where(p => p.Projection.AssetId == cdb.Id).ToList();
+        Assert.Equal(2, cdbItems.Count);
+        Assert.All(
+            cdbItems,
+            item =>
+            {
+                Assert.Equal(20.0m, item.Projection.NextTaxRate);
+                Assert.Equal(new DateOnly(2025, 9, 29), item.Projection.NextTaxRateDate);
+                Assert.Equal(new DateOnly(2025, 5, 1), item.Projection.IofFreeDate);
+            });
+    }
+
+    [Fact]
+    public async Task Sem_data_o_aporte_posterior_a_data_padrao_recebe_aporte_mais_181_e_aporte_mais_30()
+    {
+        // Arrange: data padrão 2025-04-22 (CDI até 2025-04-17). O CDB aportado em 2025-05-05 é projetado
+        // na própria data do aporte (d = 0), mas as datas contam a partir dele: 2025-11-02 e 2025-06-04.
+        var asset = CriarAsset(AssetType.Cdb);
+        var position = new Position(asset, 1_000m, new DateOnly(2025, 5, 5));
+        var useCase = CriarCaso(
+            new[] { position },
+            new[] { asset },
+            new IndexRate(IndexType.Cdi, new DateOnly(2025, 4, 17), 0.05m));
+
+        // Act
+        var response = await useCase.ExecuteAsync(referenceDate: null);
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        var item = Assert.Single(response.Data!.Positions).Projection;
+        Assert.Equal(0, item.ElapsedDays);
+        Assert.Equal(20.0m, item.NextTaxRate);
+        Assert.Equal(new DateOnly(2025, 11, 2), item.NextTaxRateDate);
+        Assert.Equal(new DateOnly(2025, 6, 4), item.IofFreeDate);
+    }
+
+    [Fact]
+    public async Task Por_titulo_com_data_informada_agrupa_na_ordem_dos_itens_com_os_totais_do_caso_16()
+    {
+        // Arrange: caso 16 da spec da F13. A (CDB, dois aportes de R$ 1.000 em 01/04/2025) e B (LCI,
+        // R$ 1.500 em 02/04/2025), referência 22/04/2025. B foi aportado depois, então vem primeiro em
+        // Positions e em ByAsset.
+        var cdb = CriarAsset(AssetType.Cdb, name: "CDB A");
+        var lci = CriarAsset(AssetType.Lci, name: "LCI B");
+        var positions = CriarAportesDoCaso16(cdb, lci);
+        var useCase = CriarCaso(positions, new[] { cdb, lci });
+
+        // Act
+        var response = await useCase.ExecuteAsync(new DateOnly(2025, 4, 22));
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        var data = response.Data!;
+        AssertTotaisPorTituloDoCaso16(data, lci, cdb);
+        AssertFechamento(data);
+    }
+
+    [Fact]
+    public async Task Por_titulo_sem_data_informada_usa_a_data_padrao_e_tem_os_totais_do_caso_16()
+    {
+        // Arrange: a última cotação de CDI é quinta, 2025-04-17; 18/04 e 21/04 são feriados, então a
+        // data padrão é terça, 2025-04-22, a mesma referência do teste anterior.
+        var cdb = CriarAsset(AssetType.Cdb, name: "CDB A");
+        var lci = CriarAsset(AssetType.Lci, name: "LCI B");
+        var positions = CriarAportesDoCaso16(cdb, lci);
+        var useCase = CriarCaso(
+            positions, new[] { cdb, lci }, new IndexRate(IndexType.Cdi, new DateOnly(2025, 4, 17), 0.05m));
+
+        // Act
+        var response = await useCase.ExecuteAsync(referenceDate: null);
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        var data = response.Data!;
+        Assert.Equal(new DateOnly(2025, 4, 22), data.ReferenceDate);
+        AssertTotaisPorTituloDoCaso16(data, lci, cdb);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Por_titulo_tem_os_mesmos_totais_da_projecao_do_titulo_na_mesma_data(bool informarData)
+    {
+        // Arrange
+        var cdb = CriarAsset(AssetType.Cdb, name: "CDB A");
+        var lci = CriarAsset(AssetType.Lci, name: "LCI B");
+        var positions = CriarAportesDoCaso16(cdb, lci);
+        var cdi = new IndexRate(IndexType.Cdi, new DateOnly(2025, 4, 17), 0.05m);
+        var summaryUseCase = CriarCaso(positions, new[] { cdb, lci }, cdi);
+        var assetUseCase = new GetAssetProjectionUseCase(
+            new FixedIncomeAssetRepositoryStub(new[] { cdb, lci }),
+            new PositionRepositoryStub(positions),
+            new PositionProjector(CriarLoader(cdi), new TimeProviderStub(Now)));
+        DateOnly? referenceDate = informarData ? new DateOnly(2025, 4, 22) : null;
+
+        // Act
+        var summary = (await summaryUseCase.ExecuteAsync(referenceDate)).Data!;
+        var cdbProjection = (await assetUseCase.ExecuteAsync(cdb.Id, referenceDate)).Data!;
+        var lciProjection = (await assetUseCase.ExecuteAsync(lci.Id, referenceDate)).Data!;
+
+        // Assert
+        AssertTotaisIguaisAProjecaoDoTitulo(summary.ByAsset.Single(item => item.AssetId == cdb.Id), cdbProjection);
+        AssertTotaisIguaisAProjecaoDoTitulo(summary.ByAsset.Single(item => item.AssetId == lci.Id), lciProjection);
+    }
+
+    [Fact]
+    public async Task Por_titulo_nao_inclui_titulo_cujos_aportes_ficam_todos_depois_da_data_informada()
+    {
+        // Arrange: o aporte do segundo título é de 25/04/2025, depois da referência 22/04/2025, e fica
+        // fora dos itens, então o título não tem posição em Positions nem item em ByAsset.
+        var included = CriarAsset(AssetType.Cdb, name: "CDB A");
+        var later = CriarAsset(AssetType.Lci, name: "LCI C");
+        var positions = new[]
+        {
+            new Position(later, 500m, new DateOnly(2025, 4, 25)),
+            new Position(included, 1_000m, new DateOnly(2025, 4, 1))
+        };
+        var useCase = CriarCaso(positions, new[] { included, later });
+
+        // Act
+        var response = await useCase.ExecuteAsync(new DateOnly(2025, 4, 22));
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        var item = Assert.Single(response.Data!.ByAsset);
+        Assert.Equal(included.Id, item.AssetId);
+        Assert.Equal(1, item.PositionCount);
+        Assert.DoesNotContain(response.Data.ByAsset, byAsset => byAsset.AssetId == later.Id);
+    }
+
+    [Fact]
+    public async Task Por_titulo_e_vazio_com_a_carteira_vazia()
+    {
+        // Arrange
+        var useCase = CriarCaso(Array.Empty<Position>(), Array.Empty<FixedIncomeAsset>());
+
+        // Act
+        var response = await useCase.ExecuteAsync(referenceDate: null);
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.Empty(response.Data!.ByAsset);
+    }
+
+    // Do mais recente para o mais antigo, como o repositório entrega (RN-14): B, A, A.
+    private static Position[] CriarAportesDoCaso16(FixedIncomeAsset cdb, FixedIncomeAsset lci) => new[]
+    {
+        new Position(lci, 1_500m, new DateOnly(2025, 4, 2)),
+        new Position(cdb, 1_000m, new DateOnly(2025, 4, 1)),
+        new Position(cdb, 1_000m, new DateOnly(2025, 4, 1))
+    };
+
+    // Caso 16: byAsset[0] = B (LCI), byAsset[1] = A (CDB), cada total conferido, e a raiz.
+    private static void AssertTotaisPorTituloDoCaso16(
+        PortfolioSummaryResponse data, FixedIncomeAsset lci, FixedIncomeAsset cdb)
+    {
+        Assert.Equal(2, data.ByAsset.Count);
+
+        var b = data.ByAsset[0];
+        Assert.Equal(lci.Id, b.AssetId);
+        Assert.Equal(1, b.PositionCount);
+        Assert.Equal(1_500.00m, b.TotalInvestedAmount);
+        Assert.Equal(1_506.82m, b.TotalGrossAmount);
+        Assert.Equal(6.82m, b.TotalGrossYield);
+        Assert.Equal(0.00m, b.TotalTaxAmount);
+        Assert.Equal(2.25m, b.TotalIofAmount);
+        Assert.Equal(1_504.57m, b.TotalNetAmount);
+        Assert.Equal(4.57m, b.TotalNetYield);
+
+        var a = data.ByAsset[1];
+        Assert.Equal(cdb.Id, a.AssetId);
+        Assert.Equal(2, a.PositionCount);
+        Assert.Equal(2_000.00m, a.TotalInvestedAmount);
+        Assert.Equal(2_009.86m, a.TotalGrossAmount);
+        Assert.Equal(9.86m, a.TotalGrossYield);
+        Assert.Equal(1.56m, a.TotalTaxAmount);
+        Assert.Equal(2.96m, a.TotalIofAmount);
+        Assert.Equal(2_005.34m, a.TotalNetAmount);
+        Assert.Equal(5.34m, a.TotalNetYield);
+
+        Assert.Equal(3, data.PositionCount);
+        Assert.Equal(3_500.00m, data.TotalInvestedAmount);
+        Assert.Equal(3_516.68m, data.TotalGrossAmount);
+        Assert.Equal(16.68m, data.TotalGrossYield);
+        Assert.Equal(1.56m, data.TotalTaxAmount);
+        Assert.Equal(5.21m, data.TotalIofAmount);
+        Assert.Equal(3_509.91m, data.TotalNetAmount);
+        Assert.Equal(9.91m, data.TotalNetYield);
+
+        // Cada total do título é a soma dos itens dele em Positions.
+        foreach (var item in data.ByAsset)
+        {
+            var own = data.Positions.Where(p => p.Asset.Id == item.AssetId).Select(p => p.Projection).ToList();
+            Assert.Equal(own.Count, item.PositionCount);
+            Assert.Equal(own.Sum(p => p.InvestedAmount), item.TotalInvestedAmount);
+            Assert.Equal(own.Sum(p => p.GrossAmount), item.TotalGrossAmount);
+            Assert.Equal(own.Sum(p => p.GrossYield), item.TotalGrossYield);
+            Assert.Equal(own.Sum(p => p.TaxAmount), item.TotalTaxAmount);
+            Assert.Equal(own.Sum(p => p.IofAmount), item.TotalIofAmount);
+            Assert.Equal(own.Sum(p => p.NetAmount), item.TotalNetAmount);
+            Assert.Equal(own.Sum(p => p.NetYield), item.TotalNetYield);
+        }
+    }
+
+    private static void AssertTotaisIguaisAProjecaoDoTitulo(
+        PortfolioSummaryResponse.AssetSummaryResponse item, AssetProjectionResponse projection)
+    {
+        Assert.Equal(projection.AssetId, item.AssetId);
+        Assert.Equal(projection.PositionCount, item.PositionCount);
+        Assert.Equal(projection.TotalInvestedAmount, item.TotalInvestedAmount);
+        Assert.Equal(projection.TotalGrossAmount, item.TotalGrossAmount);
+        Assert.Equal(projection.TotalGrossYield, item.TotalGrossYield);
+        Assert.Equal(projection.TotalTaxAmount, item.TotalTaxAmount);
+        Assert.Equal(projection.TotalIofAmount, item.TotalIofAmount);
+        Assert.Equal(projection.TotalNetAmount, item.TotalNetAmount);
+        Assert.Equal(projection.TotalNetYield, item.TotalNetYield);
+    }
+
     private static GetPortfolioSummaryUseCase CriarCasoComCalendarioVazio(
         IEnumerable<Position> positions, IEnumerable<FixedIncomeAsset> assets, params IndexRate[] rates)
     {
@@ -1259,7 +1524,8 @@ public class GetPortfolioSummaryUseCaseTests
 
         public Task<Position?> GetByIdAsync(Guid id) => Task.FromResult<Position?>(null);
 
-        public Task<IEnumerable<Position>> GetByAssetIdAsync(Guid assetId) => Task.FromResult(_positions);
+        public Task<IEnumerable<Position>> GetByAssetIdAsync(Guid assetId) =>
+            Task.FromResult(_positions.Where(p => p.AssetId == assetId).AsEnumerable());
 
         public Task AddAsync(Position position) => Task.CompletedTask;
     }

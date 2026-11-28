@@ -14,7 +14,8 @@ public record AssetProjectionResponse(
     decimal TotalNetAmount,
     int PositionCount,
     DateOnly ReferenceDate,
-    IReadOnlyList<PositionProjectionResponse> Positions)
+    IReadOnlyList<PositionProjectionResponse> Positions,
+    decimal TotalNetYield)
 {
     public static AssetProjectionResponse FromSummary(
         Guid assetId,
@@ -30,5 +31,6 @@ public record AssetProjectionResponse(
         summary.TotalNetAmount,
         summary.PositionCount,
         referenceDate,
-        positions);
+        positions,
+        summary.TotalNetYield);
 }

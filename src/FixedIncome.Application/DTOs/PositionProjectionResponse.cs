@@ -18,7 +18,11 @@ public record PositionProjectionResponse(
     bool IsEstimated,
     DateOnly ReferenceDate,
     DateOnly ApplicationDate,
-    bool IsProjected)
+    bool IsProjected,
+    decimal NetYield,
+    decimal? NextTaxRate,
+    DateOnly? NextTaxRateDate,
+    DateOnly? IofFreeDate)
 {
     public static PositionProjectionResponse FromProjection(
         Guid positionId,
@@ -41,5 +45,9 @@ public record PositionProjectionResponse(
         projection.IsEstimated,
         referenceDate,
         applicationDate,
-        projection.IsProjected);
+        projection.IsProjected,
+        projection.NetYield,
+        projection.NextTaxRate,
+        projection.NextTaxRateDate,
+        projection.IofFreeDate);
 }

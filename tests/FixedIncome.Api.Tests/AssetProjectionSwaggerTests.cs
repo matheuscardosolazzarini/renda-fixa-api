@@ -39,7 +39,7 @@ public class AssetProjectionSwaggerTests(PostgreSqlFixture postgres) : ApiTestBa
         Assert.Equal(
             [
                 "assetId", "totalInvestedAmount", "totalGrossAmount", "totalGrossYield", "totalTaxAmount",
-                "totalIofAmount", "totalNetAmount", "positionCount", "referenceDate", "positions"
+                "totalIofAmount", "totalNetAmount", "positionCount", "referenceDate", "positions", "totalNetYield"
             ],
             properties.EnumerateObject().Select(p => p.Name).ToArray());
         Assert.False(properties.TryGetProperty("isProjected", out _));
@@ -48,7 +48,7 @@ public class AssetProjectionSwaggerTests(PostgreSqlFixture postgres) : ApiTestBa
         foreach (var name in new[]
         {
             "totalInvestedAmount", "totalGrossAmount", "totalGrossYield", "totalTaxAmount", "totalIofAmount",
-            "totalNetAmount"
+            "totalNetAmount", "totalNetYield"
         })
         {
             Assert.Equal("number", properties.GetProperty(name).GetProperty("type").GetString());
