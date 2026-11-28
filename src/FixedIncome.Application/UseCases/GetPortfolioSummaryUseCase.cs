@@ -64,7 +64,7 @@ public class GetPortfolioSummaryUseCase : IGetPortfolioSummaryUseCase
 
         // Lista única: posição, título, projeção e data usada. Alimenta os totais (RN-07) e os itens de
         // Positions, para a soma dos itens fechar exatamente com os totais, sem recalcular.
-        var summary = PortfolioSummary.Create(projected.Items.Select(p => (p.Projection, p.Asset.AssetType)));
+        var summary = PortfolioSummary.Create(projected.Items.Select(p => (p.Projection, p.Asset.Id, p.Asset.AssetType)));
 
         // Mesma ordem do repositório (D-6) e a mesma projeção que alimentou os totais.
         var items = projected.Items

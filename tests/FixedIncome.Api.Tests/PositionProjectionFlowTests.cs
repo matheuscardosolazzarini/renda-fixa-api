@@ -1,6 +1,7 @@
 using FixedIncome.Tests.Shared;
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using FixedIncome.Domain.Entities;
 using FixedIncome.Domain.Enums;
 using FixedIncome.Infrastructure.Context;
@@ -182,7 +183,7 @@ public class PositionProjectionFlowTests(PostgreSqlFixture postgres) : ApiTestBa
     }
 
     [Fact]
-    public async Task Projecao_mantem_os_campos_antigos_com_os_mesmos_nomes_e_acrescenta_so_as_duas_datas_e_is_projected()
+    public async Task Projecao_mantem_os_campos_antigos_com_os_mesmos_nomes_e_acrescenta_so_is_projected_net_yield_proxima_faixa_de_ir_e_fim_do_iof()
     {
         // Arrange
         var positionId = await CriarTituloEAporteAsync(maturityDate: "2027-01-01", applicationDate: "2025-04-01");
@@ -198,18 +199,76 @@ public class PositionProjectionFlowTests(PostgreSqlFixture postgres) : ApiTestBa
         {
             "positionId", "assetId", "investedAmount", "grossAmount", "grossYield", "taxRate", "taxAmount",
             "netAmount", "elapsedDays", "businessDays", "iofRate", "iofAmount", "isEstimated",
-            "referenceDate", "applicationDate", "isProjected"
+            "referenceDate", "applicationDate", "isProjected", "netYield", "nextTaxRate", "nextTaxRateDate",
+            "iofFreeDate"
         };
         Assert.True(names.SetEquals(expected), $"Propriedades de data: {string.Join(", ", names)}");
     }
 
-    private async Task<Guid> CriarTituloEAporteAsync(string maturityDate, string applicationDate)
+    [Fact]
+    public async Task Projecao_devolve_net_yield_como_liquido_menos_investido_no_caso_de_referencia()
+    {
+        // Arrange: caso 1a da spec da F13. Aporte de R$ 1.000 em 2025-04-01, líquido 1.002,67 em 2025-04-22.
+        var positionId = await CriarTituloEAporteAsync(maturityDate: "2027-01-01", applicationDate: "2025-04-01");
+
+        // Act
+        var response = await Client.GetAsync($"/api/positions/{positionId}/projection?referenceDate=2025-04-22");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = await ReadJsonAsync(response);
+        var data = json.RootElement.GetProperty("data");
+        Assert.Equal("1002.67", data.GetProperty("netAmount").GetRawText());
+        Assert.Equal("2.67", data.GetProperty("netYield").GetRawText());
+    }
+
+    [Fact]
+    public async Task Projecao_devolve_a_proxima_faixa_de_ir_e_o_fim_do_iof_em_literais_e_datas_iso()
+    {
+        // Arrange: caso 1a da spec da F13. Aporte em 2025-04-01 (d = 21): próxima faixa 20,0 em
+        // aporte + 181 (2025-09-29) e fim do IOF em aporte + 30 (2025-05-01, feriado, sem ajuste).
+        var positionId = await CriarTituloEAporteAsync(maturityDate: "2027-01-01", applicationDate: "2025-04-01");
+
+        // Act
+        var response = await Client.GetAsync($"/api/positions/{positionId}/projection?referenceDate=2025-04-22");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = await ReadJsonAsync(response);
+        var data = json.RootElement.GetProperty("data");
+        Assert.Equal("22.5", data.GetProperty("taxRate").GetRawText());
+        Assert.Equal("20.0", data.GetProperty("nextTaxRate").GetRawText());
+        Assert.Equal("2025-09-29", data.GetProperty("nextTaxRateDate").GetString());
+        Assert.Equal("2025-05-01", data.GetProperty("iofFreeDate").GetString());
+    }
+
+    [Fact]
+    public async Task Projecao_de_lca_devolve_os_tres_campos_presentes_e_nulos()
+    {
+        // Arrange: caso 5 da spec da F13. LCA é isenta de IR (RN-04) e de IOF (RN-11).
+        var positionId = await CriarTituloEAporteAsync(
+            maturityDate: "2027-04-01", applicationDate: "2025-04-01", assetType: "Lca");
+
+        // Act
+        var response = await Client.GetAsync($"/api/positions/{positionId}/projection?referenceDate=2025-04-22");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = await ReadJsonAsync(response);
+        var data = json.RootElement.GetProperty("data");
+        Assert.Equal(JsonValueKind.Null, data.GetProperty("nextTaxRate").ValueKind);
+        Assert.Equal(JsonValueKind.Null, data.GetProperty("nextTaxRateDate").ValueKind);
+        Assert.Equal(JsonValueKind.Null, data.GetProperty("iofFreeDate").ValueKind);
+    }
+
+    private async Task<Guid> CriarTituloEAporteAsync(
+        string maturityDate, string applicationDate, string assetType = "Cdb")
     {
         var assetResponse = await Client.PostAsJsonAsync("/api/assets", new
         {
             name = "CDB Longo",
             issuer = "Banco X",
-            assetType = "Cdb",
+            assetType,
             indexType = "PreFixed",
             rate = 10,
             issueDate = "2025-01-01",

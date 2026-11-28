@@ -28,7 +28,7 @@ public class AssetProjectionFlowTests(PostgreSqlFixture postgres) : ApiTestBase(
         Assert.Equal(
             [
                 "assetId", "totalInvestedAmount", "totalGrossAmount", "totalGrossYield", "totalTaxAmount",
-                "totalIofAmount", "totalNetAmount", "positionCount", "referenceDate", "positions"
+                "totalIofAmount", "totalNetAmount", "positionCount", "referenceDate", "positions", "totalNetYield"
             ],
             data.EnumerateObject().Select(p => p.Name).ToArray());
         Assert.Equal(assetId, data.GetProperty("assetId").GetGuid());
@@ -38,6 +38,7 @@ public class AssetProjectionFlowTests(PostgreSqlFixture postgres) : ApiTestBase(
         Assert.Equal(1.56m, data.GetProperty("totalTaxAmount").GetDecimal());
         Assert.Equal(2.96m, data.GetProperty("totalIofAmount").GetDecimal());
         Assert.Equal(2_005.34m, data.GetProperty("totalNetAmount").GetDecimal());
+        Assert.Equal("5.34", data.GetProperty("totalNetYield").GetRawText());
         Assert.Equal(2, data.GetProperty("positionCount").GetInt32());
         Assert.Equal("2025-04-22", data.GetProperty("referenceDate").GetString());
 
@@ -50,6 +51,7 @@ public class AssetProjectionFlowTests(PostgreSqlFixture postgres) : ApiTestBase(
             Assert.Equal(assetId, item.GetProperty("assetId").GetGuid());
             Assert.Equal(1_004.93m, item.GetProperty("grossAmount").GetDecimal());
             Assert.Equal(1_002.67m, item.GetProperty("netAmount").GetDecimal());
+            Assert.Equal("2.67", item.GetProperty("netYield").GetRawText());
             Assert.False(item.GetProperty("isProjected").GetBoolean());
             Assert.Equal("2025-04-22", item.GetProperty("referenceDate").GetString());
             Assert.Equal("2025-04-01", item.GetProperty("applicationDate").GetString());

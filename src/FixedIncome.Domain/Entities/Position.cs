@@ -94,7 +94,8 @@ public class Position : BaseEntity
         var grossYield = grossAmount - investedAmount;
 
         // RN-11: LCA tem IOF zero (Decreto 6.306/2007, art. 32, § 2º, V); LCI e Tesouro pagam.
-        var iofRate = asset.AssetType == AssetType.Lca ? 0m : IofTable.RateFor(elapsedDays);
+        var isIofExempt = asset.AssetType == AssetType.Lca;
+        var iofRate = isIofExempt ? 0m : IofTable.RateFor(elapsedDays);
         var taxRate = IncomeTaxTable.RateFor(asset.AssetType, elapsedDays);
 
         // Sem rendimento positivo não há imposto, mas as alíquotas seguem as da tabela pelo prazo.
@@ -110,6 +111,30 @@ public class Position : BaseEntity
             taxAmount = Round2((grossYield - iofAmount) * taxRate / 100);
         }
 
+        // RN-16: a próxima faixa de IR vale a partir de aporte + FromDay (dias corridos, AddDays: 721
+        // dias não são dois anos). Depois do vencimento a posição não chega a ela; no dia do
+        // vencimento, chega. A data e a alíquota saem nulas juntas.
+        // Compara em dias para não calcular uma data que seria descartada.
+        decimal? nextTaxRate = null;
+        DateOnly? nextTaxRateDate = null;
+        var daysToMaturity = asset.MaturityDate.DayNumber - ApplicationDate.DayNumber;
+
+        if (IncomeTaxTable.NextBracketFor(asset.AssetType, elapsedDays) is { } nextBracket
+            && nextBracket.FromDay <= daysToMaturity)
+        {
+            nextTaxRate = nextBracket.Rate;
+            nextTaxRateDate = ApplicationDate.AddDays(nextBracket.FromDay);
+        }
+
+        // RN-17: o IOF zera em aporte + 30 e só há data enquanto ainda incide (d < 30) e o título
+        // paga IOF. No dia do aporte a alíquota é 0 (sem rendimento), mas a data é a mesma.
+        DateOnly? iofFreeDate = null;
+
+        if (!isIofExempt && elapsedDays < IofTable.FreeFromDay && IofTable.FreeFromDay <= daysToMaturity)
+        {
+            iofFreeDate = ApplicationDate.AddDays(IofTable.FreeFromDay);
+        }
+
         return new PositionProjection(
             InvestedAmount: investedAmount,
             GrossAmount: grossAmount,
@@ -122,7 +147,10 @@ public class Position : BaseEntity
             IofRate: iofRate,
             IofAmount: iofAmount,
             IsEstimated: isEstimated,
-            IsProjected: isProjected);
+            IsProjected: isProjected,
+            NextTaxRate: nextTaxRate,
+            NextTaxRateDate: nextTaxRateDate,
+            IofFreeDate: iofFreeDate);
     }
 
     // RN-01: capitalização composta em base 252 dias úteis.

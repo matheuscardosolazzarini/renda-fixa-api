@@ -54,9 +54,9 @@ public class GetAssetProjectionUseCase : IGetAssetProjectionUseCase
             return ApiResponse<AssetProjectionResponse>.BadRequest(ex.Message);
         }
 
-        // Mesmos totais do resumo (RN-07), somados dos itens já arredondados; o ByAssetType do
-        // PortfolioSummary não entra na resposta do título.
-        var summary = PortfolioSummary.Create(projected.Items.Select(p => (p.Projection, p.Asset.AssetType)));
+        // Mesmos totais do resumo (RN-07), somados dos itens já arredondados; o ByAssetType e o ByAsset
+        // do PortfolioSummary não entram na resposta do título.
+        var summary = PortfolioSummary.Create(projected.Items.Select(p => (p.Projection, p.Asset.Id, p.Asset.AssetType)));
 
         // Ordem do repositório (D-12) e a mesma projeção que alimentou os totais.
         var items = projected.Items

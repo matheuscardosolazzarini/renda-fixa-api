@@ -179,7 +179,7 @@ public class PortfolioSummaryFlowTests(PostgreSqlFixture postgres) : ApiTestBase
         // Act
         var response = await Client.GetAsync("/api/portfolio/summary?referenceDate=2025-04-22");
 
-        // Assert: as 8 propriedades antigas mais referenceDate, positions e isProjected.
+        // Assert: as 8 propriedades antigas mais referenceDate, positions, isProjected, totalNetYield e byAsset (F13).
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var json = await ReadJsonAsync(response);
         var data = json.RootElement.GetProperty("data");
@@ -188,7 +188,7 @@ public class PortfolioSummaryFlowTests(PostgreSqlFixture postgres) : ApiTestBase
         {
             "totalInvestedAmount", "totalGrossAmount", "totalGrossYield", "totalTaxAmount",
             "totalIofAmount", "totalNetAmount", "positionCount", "byAssetType", "referenceDate", "positions",
-            "isProjected"
+            "isProjected", "totalNetYield", "byAsset"
         };
         Assert.True(names.SetEquals(expected), $"Propriedades de data: {string.Join(", ", names)}");
 
@@ -269,6 +269,84 @@ public class PortfolioSummaryFlowTests(PostgreSqlFixture postgres) : ApiTestBase
         Assert.Equal(data.GetProperty("totalTaxAmount").GetDecimal(), projections.Sum(p => p.GetProperty("taxAmount").GetDecimal()));
         Assert.Equal(data.GetProperty("totalIofAmount").GetDecimal(), projections.Sum(p => p.GetProperty("iofAmount").GetDecimal()));
         Assert.Equal(data.GetProperty("totalNetAmount").GetDecimal(), projections.Sum(p => p.GetProperty("netAmount").GetDecimal()));
+    }
+
+    [Fact]
+    public async Task Resumo_devolve_total_net_yield_igual_ao_liquido_menos_o_investido_no_caso_de_referencia()
+    {
+        // Arrange: caso 29 da F12 / caso 1a da F13. Dois aportes de R$ 1.000 no mesmo CDB PreFixed,
+        // cada um com líquido 1.002,67 em 2025-04-22.
+        var cdbId = await CriarTituloAsync("CDB Banco X", "Banco X", "Cdb", 10);
+        await CriarAporteAsync(cdbId, 1000, "2025-04-01");
+        await CriarAporteAsync(cdbId, 1000, "2025-04-01");
+
+        // Act
+        var response = await Client.GetAsync("/api/portfolio/summary?referenceDate=2025-04-22");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = await ReadJsonAsync(response);
+        var data = json.RootElement.GetProperty("data");
+        Assert.Equal("2005.34", data.GetProperty("totalNetAmount").GetRawText());
+        Assert.Equal("5.34", data.GetProperty("totalNetYield").GetRawText());
+        Assert.All(
+            data.GetProperty("positions").EnumerateArray(),
+            item => Assert.Equal("2.67", item.GetProperty("projection").GetProperty("netYield").GetRawText()));
+    }
+
+    [Fact]
+    public async Task Resumo_com_dois_titulos_devolve_by_asset_com_os_nomes_do_contrato_e_os_totais_da_projecao_de_cada_titulo()
+    {
+        // Arrange: caso 16 da spec da F13. A (CDB, dois aportes de R$ 1.000 em 2025-04-01) e B (LCI, R$ 1.500
+        // em 2025-04-02). B foi aportado depois, então é o primeiro de positions e de byAsset.
+        var cdbId = await CriarTituloAsync("CDB Banco X", "Banco X", "Cdb", 10);
+        var lciId = await CriarTituloAsync("LCI Banco Y", "Banco Y", "Lci", 10);
+        await CriarAporteAsync(cdbId, 1000, "2025-04-01");
+        await CriarAporteAsync(cdbId, 1000, "2025-04-01");
+        await CriarAporteAsync(lciId, 1500, "2025-04-02");
+
+        // Act
+        var response = await Client.GetAsync("/api/portfolio/summary?referenceDate=2025-04-22");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = await ReadJsonAsync(response);
+        var byAsset = json.RootElement.GetProperty("data").GetProperty("byAsset").EnumerateArray().ToList();
+        Assert.Equal(2, byAsset.Count);
+
+        var expectedNames = new HashSet<string>
+        {
+            "assetId", "positionCount", "totalInvestedAmount", "totalGrossAmount", "totalGrossYield",
+            "totalTaxAmount", "totalIofAmount", "totalNetAmount", "totalNetYield"
+        };
+        foreach (var item in byAsset)
+        {
+            var names = item.EnumerateObject().Select(p => p.Name).ToHashSet();
+            Assert.True(names.SetEquals(expectedNames), $"Propriedades de byAsset: {string.Join(", ", names)}");
+        }
+
+        Assert.Equal(lciId, byAsset[0].GetProperty("assetId").GetGuid());
+        Assert.Equal(cdbId, byAsset[1].GetProperty("assetId").GetGuid());
+        Assert.Equal(1, byAsset[0].GetProperty("positionCount").GetInt32());
+        Assert.Equal(2, byAsset[1].GetProperty("positionCount").GetInt32());
+        Assert.Equal(4.57m, byAsset[0].GetProperty("totalNetYield").GetDecimal());
+        Assert.Equal(5.34m, byAsset[1].GetProperty("totalNetYield").GetDecimal());
+
+        // Os totais de cada título são os de GET /api/assets/{id}/projection na mesma data.
+        foreach (var item in byAsset)
+        {
+            var assetId = item.GetProperty("assetId").GetGuid();
+            var projectionResponse = await Client.GetAsync(
+                $"/api/assets/{assetId}/projection?referenceDate=2025-04-22");
+            Assert.Equal(HttpStatusCode.OK, projectionResponse.StatusCode);
+            using var projectionJson = await ReadJsonAsync(projectionResponse);
+            var projection = projectionJson.RootElement.GetProperty("data");
+
+            foreach (var field in expectedNames)
+            {
+                Assert.Equal(projection.GetProperty(field).GetRawText(), item.GetProperty(field).GetRawText());
+            }
+        }
     }
 
     private async Task<Guid> CriarTituloAsync(string name, string issuer, string assetType, decimal rate)

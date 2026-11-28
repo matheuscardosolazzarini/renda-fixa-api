@@ -1,10 +1,10 @@
 # Roadmap v2 — renda-fixa-api
 
-Atualizado em 26/11/2026.
+Atualizado em 27/11/2026.
 
 ## Objetivo
 
-A v1 (F1 a F6) entregou a API com taxas fixas no `appsettings.json`. A v2 dá o próximo passo: o sistema passa a usar dados de mercado reais, publica sozinho uma imagem testada e ganha testes que provam que os cálculos estão certos. A numeração continua a da v1. A ordem é F7, depois F8, depois F9. A F10 é opcional. A F11 (nuvem na AWS) vem depois da F9 e não depende da F10. A F12 (contrato v2 para o front) também depende só da F9.
+A v1 (F1 a F6) entregou a API com taxas fixas no `appsettings.json`. A v2 dá o próximo passo: o sistema passa a usar dados de mercado reais, publica sozinho uma imagem testada e ganha testes que provam que os cálculos estão certos. A numeração continua a da v1. A ordem é F7, depois F8, depois F9. A F10 é opcional. A F11 (nuvem na AWS) vem depois da F9 e não depende da F10. A F12 (contrato v2 para o front) também depende só da F9, e a F13 (contrato v3) depende da F12.
 
 Como usar este roadmap:
 
@@ -14,7 +14,7 @@ Como usar este roadmap:
 
 ## Como executar uma fase
 
-No Claude Code, rode `/executar-fase F7` (ou F8, F9, F10, F11, F12). O comando, em `.claude/commands/executar-fase.md`, coordena quatro agentes de `.claude/agents/`:
+No Claude Code, rode `/executar-fase F7` (ou F8, F9, F10, F11, F12, F13). O comando, em `.claude/commands/executar-fase.md`, coordena quatro agentes de `.claude/agents/`:
 
 | Agente | Papel |
 |---|---|
@@ -36,11 +36,13 @@ flowchart TD
     F10["<b>F10 · Observabilidade, cache, eventos</b><br/>Opcional: OpenTelemetry, Redis e outbox"]
     F11["<b>F11 · Nuvem na AWS</b><br/>Terraform, ambiente efêmero e Floci"]
     F12["<b>F12 · Contrato v2 para o front</b><br/>projeção futura, acumulado e projeção por título"]
+    F13["<b>F13 · Contrato v3 para o front</b><br/>ganho líquido, próxima faixa de IR, fim do IOF e totais por título"]
     F7 -- "CDB 100% CDI bate com a Calculadora do Cidadão (± R$ 0,01)" --> F8
     F8 -- "merge na main publica imagem testada sem passo manual" --> F9
     F9 -- "integração no CI e mutation score do Domain ≥ 80%" --> F10
     F9 --> F11
     F9 --> F12
+    F12 --> F13
     style F10 stroke-dasharray: 5 5
 ```
 
@@ -319,7 +321,7 @@ fase.
 - [x] `dotnet build` sem warning e `dotnet test` verde, com 712 testes ou mais (863)
 - [x] Mutation score do Domain continua em 80% ou mais (96,96%)
 
-Status: **concluída** em 27/11/2026, ainda sem commit (863 testes, antes 712;
+Status: **concluída** em 27/11/2026 (PR #20, merge `9174345`; 863 testes, antes 712;
 `docs/SPEC-F12-EXECUCAO.md`, `docs/VALIDACAO-F12.md`, `docs/QA-F12.md`). A regra de 7 casas do
 fator do IPCA no acumulado (D-10) reproduziu a Calculadora do Cidadão em 17 de 17 períodos, mas
 segue inferida das saídas dela, não de metodologia publicada pelo BC. O QA não achou bug; dos 11
@@ -340,6 +342,53 @@ Riscos da triagem do `docs/QA-F12.md`, todos de severidade baixa e nenhum bloque
 - [ ] **Fora da F12: `PreFixed` no enum do Swagger.** O enum `IndexType` do Swagger lista `PreFixed`, que as rotas de cotação recusam com 400. QA: A28.
 - [ ] **Fora da F12: escala da taxa no `PUT` de título.** `PUT /api/assets/{id}` devolve `"rate":13` e o `GET` do mesmo título devolve `12.000000`, formato diferente entre respostas do mesmo recurso. QA: A29.
 
+## F13 — Contrato v3 para o front
+
+Decisão de 27/11/2026: a análise do `DESIGN.md` do front mostrou quatro dados que as telas usam e
+que o front só conseguiria calculando, o que a D-07 dele proíbe: o ganho líquido, a data em que o
+imposto de cada depósito cai, a data em que o IOF zera e os totais de cada título na lista. A F13
+entrega os quatro prontos, sem mudar nenhum campo existente. A liquidez do título ficou de fora: o
+front deixou de mostrá-la.
+
+### Antes de começar
+
+- [x] RN-15 a RN-18 e a F13 registradas em `ESPECIFICACAO.md`
+- [x] `/executar-fase` aceita a F13
+
+### Passos
+
+1. RN-15: `netYield` na projeção e `totalNetYield` no consolidado e na projeção por título.
+2. RN-16 e RN-17: `nextTaxRate`, `nextTaxRateDate` e `iofFreeDate` na projeção da posição, também
+   nos itens do consolidado e da projeção por título.
+3. RN-18: `byAsset` no consolidado.
+4. Swagger, teste do `swagger.json`, `FixedIncome.Api.http` e README.
+
+### Critérios de conclusão
+
+- [x] `netYield` e `totalNetYield` fecham com `líquido − investido` em todos os casos de referência,
+  inclusive com IOF
+- [x] As fronteiras da RN-16 batem com os casos de referência do `especialista-renda-fixa`: dias 180,
+  181, 360, 361, 720 e 721, título isento e faixa depois do vencimento
+- [x] As fronteiras da RN-17 batem: dias 29 e 30, LCA, LCI e data depois do vencimento
+- [x] Em `byAsset`, os totais de cada título são iguais à soma dos itens de `positions` dele e iguais
+  aos da projeção por título na mesma data
+- [x] Só aditivo: o teste do `swagger.json` mostra os campos novos e nenhum campo existente alterado
+- [x] `dotnet build` sem warning e `dotnet test` verde, com 863 testes ou mais (975)
+- [x] Mutation score do Domain continua em 80% ou mais (97,15%)
+
+Status: **concluída** em 27/11/2026, ainda sem commit (975 testes, antes 863;
+`docs/SPEC-F13-EXECUCAO.md`, `docs/VALIDACAO-F13.md`, `docs/QA-F13.md`). O QA comparou a fase com a
+`main` em 1793 rotas, sobre a cópia da carteira, e não achou nenhum campo antigo diferente. Não
+houve bug; dos três riscos, todos de severidade baixa, o risco 1 foi corrigido antes do commit e os
+riscos 2 e 3 ficam em "Pendências herdadas da F13".
+
+### Pendências herdadas da F13
+
+Riscos da triagem do `docs/QA-F13.md`, todos de severidade baixa e nenhum bloqueante. O risco 1 (o README não dizia que título vencido devolve `nextTaxRate`, `nextTaxRateDate` e `iofFreeDate` nulos) já foi corrigido na própria F13.
+
+- [ ] **Zero em duas formas (risco 2).** `netYield` zero sai `0.00` nos itens e `totalNetYield` sai `0` com carteira vazia ou título sem aporte, como `taxAmount` e `iofAmount` já saíam antes da fase. QA: A08, A14, B00.
+- [ ] **Consolidado mais pesado (risco 3).** Com `byAsset` e os campos novos, a resposta de 907 itens cresce 23% e o tempo sobe de 8% a 12% contra a `main`; agrava o risco 11 da F12 sem mudar a ordem de grandeza. QA: B04.
+
 ## Definição de pronto (vale para toda tarefa)
 
 Uma tarefa só está concluída quando passa nos sete pontos abaixo, além dos critérios da fase.
@@ -359,4 +408,5 @@ O núcleo da v2 está entregue: F7, F8 e F9 concluídas, com as pendências herd
 - **F10 — Observabilidade, cache e eventos (opcional).** Continua valendo o critério de entrar só se as vagas pedirem. Como a nuvem está adiada, o Application Insights não tem onde rodar: antes de começar, trocar o destino da telemetria por algo que rode local (um coletor OpenTelemetry com visualizador em contêiner no Compose) e reescrever o primeiro e o segundo critérios de conclusão da F10 para esse destino. A troca entra como item de "Decisões em aberto" da `ESPECIFICACAO.md` e precisa estar fechada antes de rodar `/executar-fase F10`.
 - **Teste de segurança.** Avaliar a API rodando, do lado de fora, além das auditorias de workflow (`actionlint` e `zizmor`) que já existem.
 - **F11 — Nuvem na AWS.** Implementada e mergeada (PR #19). Falta criar a conta (P0) e a validação ao vivo (P8), adiadas pelo Matheus em 26/11/2026.
-- **F12 — Contrato v2 para o front.** Concluída em 27/11/2026 (`docs/VALIDACAO-F12.md`). Falta o commit e o PR. Os riscos 4, 5 e 7 do QA foram corrigidos; os outros oito, de severidade baixa (`docs/QA-F12.md`), ficam para decisão do Matheus.
+- **F12 — Contrato v2 para o front.** Concluída e mergeada em 27/11/2026 (PR #20). Pendências de severidade baixa em "Pendências herdadas da F12".
+- **F13 — Contrato v3 para o front.** Concluída em 27/11/2026, ainda sem commit. Pendências de severidade baixa em "Pendências herdadas da F13".

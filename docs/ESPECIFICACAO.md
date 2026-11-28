@@ -32,6 +32,8 @@ projetada para uma data, já líquida de imposto de renda.
 - Testes de integração contra PostgreSQL real, regras de arquitetura e mutation testing
 - Contrato v2 para o front (F12): projeção com data futura (RN-12), variação acumulada de um
   indexador (RN-13) e projeção consolidada por título (RN-14)
+- Contrato v3 para o front (F13): ganho líquido (RN-15), próxima faixa de IR (RN-16), fim do IOF
+  (RN-17) e totais por título no consolidado (RN-18)
 
 ### Fora do escopo
 
@@ -246,6 +248,32 @@ responde 200, com totais zero, lista vazia e `referenceDate` presente. Título i
 404. Os aportes saem na ordem do consolidado, o mais recente primeiro, sem garantia entre aportes do
 mesmo dia.
 
+**RN-15 — Ganho líquido** (v2, F13). A projeção devolve `netYield`, o valor líquido menos o valor
+investido, com os dois já arredondados. O consolidado e a projeção por título devolvem
+`totalNetYield`, a soma dos `netYield` dos itens (RN-07), que é sempre igual a `TotalNetAmount −
+TotalInvestedAmount`. O campo existe para quem exibe não precisar subtrair valores.
+
+**RN-16 — Próxima faixa de IR** (v2, F13). A projeção de uma posição devolve `nextTaxRate`, a
+alíquota da faixa seguinte da RN-03, e `nextTaxRateDate`, o primeiro dia em que ela vale, contado
+em dias corridos a partir da data do aporte: aporte + 181 dias (20%), + 361 dias (17,5%) ou + 721
+dias (15%). A faixa seguinte é a primeira ainda não alcançada na data de referência, limitada pela
+RN-02. Os dois campos vêm nulos quando o título é isento (RN-04), quando a alíquota na data de
+referência já é 15% ou quando `nextTaxRateDate` cairia depois do vencimento, porque a posição nunca
+chega a essa faixa. A data depende só do aporte e da referência: não usa cotação, não é projetada
+e não muda `isProjected` nem `isEstimated`.
+
+**RN-17 — Fim do IOF** (v2, F13). A projeção de uma posição devolve `iofFreeDate`, o primeiro dia
+em que o IOF é zero pela RN-11: aporte + 30 dias corridos. Vem nulo quando o prazo na data de
+referência já é de 30 dias ou mais, quando o título é LCA (IOF zero) ou quando a data cairia depois
+do vencimento. LCI, CDB e Tesouro Direto pagam IOF e recebem a data.
+
+**RN-18 — Totais por título no consolidado** (v2, F13). O consolidado devolve `byAsset`: um item
+por título com pelo menos uma posição incluída no resumo, com `assetId`, `positionCount` e os
+totais de investido, bruto, rendimento bruto, IR, IOF, líquido e ganho líquido. Cada total é a soma
+dos itens de `positions` daquele título (RN-07), saídos da mesma lista de projeções, e as regras de
+data são as do consolidado. A ordem é a da primeira aparição do título em `positions`. `byAsset`
+não traz marca de estimado nem de projetado: quem exibe olha os itens de `positions` do título.
+
 ## Endpoints
 
 | Método | Rota | Descrição |
@@ -269,7 +297,9 @@ devido e valor líquido. Na v2, retorna também alíquota e valor de IOF, e indi
 é estimada (RN-10). A partir da F12, indica também se usa taxas projetadas (`isProjected`,
 RN-12). As mudanças da F12 no contrato são só aditivas: nenhum campo existente muda de nome ou de
 tipo. O que muda de valor são as duas consequências da RN-12 (IPCA+ no mês de hoje e data
-informada depois da última cotação de CDI).
+informada depois da última cotação de CDI). A F13 acrescenta à projeção `netYield`, `nextTaxRate`,
+`nextTaxRateDate` e `iofFreeDate` (RN-15 a RN-17), ao consolidado e à projeção por título
+`totalNetYield`, e ao consolidado `byAsset` (RN-18). Também só aditivo, sem mudar nenhum valor existente.
 
 A projeção devolve também `referenceDate`, a data pedida (a informada ou a padrão resolvida,
 descrita abaixo), e `applicationDate`, a data do aporte. Numa posição vencida, `referenceDate`
@@ -425,6 +455,10 @@ prazo de validade e destruição automática. Não depende da F10, que é opcion
 no vencimento, o CDI e a inflação acumulados e o total de cada título sem calcular dinheiro no
 navegador: RN-12 a RN-14, com os dois endpoints novos e o campo `isProjected`. Depende da F9. A
 validação ao vivo da F11 foi adiada pelo Matheus e não bloqueia a F12 (decisão de 26/11/2026).
+
+**F13 — Contrato v3 para o front.** O que ainda obrigaria o front a calcular: o ganho líquido, a
+data em que o imposto de cada depósito cai, a data em que o IOF zera e os totais de cada título na
+lista. RN-15 a RN-18, só aditivas. Depende da F12 (decisão de 27/11/2026).
 
 Passos e critérios de cada fase da v2 estão em `docs/ROADMAP.md`. O detalhamento de execução
 fica em `docs/SPEC-Fx-EXECUCAO.md`, escrito no começo de cada fase.

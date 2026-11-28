@@ -12,4 +12,11 @@ public record PositionProjection(
     decimal IofRate,
     decimal IofAmount,
     bool IsEstimated,
-    bool IsProjected);
+    bool IsProjected,
+    decimal? NextTaxRate,
+    DateOnly? NextTaxRateDate,
+    DateOnly? IofFreeDate)
+{
+    // RN-15: calculado, não posicional, para que o ganho nunca divirja do líquido e do investido.
+    public decimal NetYield => NetAmount - InvestedAmount;
+}

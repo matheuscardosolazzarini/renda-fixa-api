@@ -13,6 +13,9 @@ public static class IofTable
         30m, 26m, 23m, 20m, 16m, 13m, 10m, 6m, 3m, 0m
     };
 
+    // Primeiro dia sem IOF (RN-11): o dia cuja alíquota é 0%.
+    public static int FreeFromDay => Rates.Length;
+
     public static decimal RateFor(int elapsedDays)
     {
         if (elapsedDays < 0)

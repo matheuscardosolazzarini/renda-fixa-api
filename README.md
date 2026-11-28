@@ -291,6 +291,68 @@ GET /api/assets/{id}/projection?referenceDate=2025-04-22
 Um título sem aportes incluídos responde 200, com totais zero, lista vazia e `referenceDate`.
 Título inexistente responde 404. Nas respostas de erro (400 e 404), `data` é nulo.
 
+### Ganho líquido, próxima faixa de IR e fim do IOF
+
+Desde a F13, a projeção de uma posição, o consolidado e a projeção por título ganham campos
+novos. São só aditivos: nenhum campo existente mudou de nome, tipo ou valor.
+
+- `netYield` (na projeção de uma posição): `netAmount` menos `investedAmount`, com os dois já
+  arredondados. Pode ser negativo, num IPCA+ com deflação, e é zero no dia do aporte.
+- `totalNetYield` (no consolidado e na projeção por título): a soma dos `netYield` dos itens. É
+  sempre igual a `totalNetAmount` menos `totalInvestedAmount`.
+- `nextTaxRate` e `nextTaxRateDate` (na projeção de uma posição): a alíquota da próxima faixa de IR
+  e a data em que ela passa a valer, aporte + 181 dias (20%), + 361 dias (17,5%) ou + 721 dias
+  (15%). Vêm nulos para LCI e LCA, quando a alíquota na data de referência já é 15% e quando a
+  data cairia depois do vencimento. Numa data igual ao vencimento, ela é devolvida.
+- `iofFreeDate` (na projeção de uma posição): aporte + 30 dias, a data em que o IOF deixa de
+  incidir. Vem nulo quando o prazo na data de referência já é de 30 dias ou mais, para LCA e quando
+  a data cairia depois do vencimento.
+
+Numa posição de título vencido, os três campos (`nextTaxRate`, `nextTaxRateDate` e `iofFreeDate`)
+vêm nulos: a data de cálculo para no vencimento (RN-02), e a posição não alcança mais nenhuma faixa.
+
+As datas são sempre em dias corridos, nunca em meses ou anos, e não têm ajuste para dia útil: podem
+cair em fim de semana ou feriado. Os campos nulos saem como `null`, com o campo presente.
+
+Os itens de `positions` do consolidado (`positions[].projection`) e da projeção por título trazem
+os mesmos quatro campos de posição (`netYield`, `nextTaxRate`, `nextTaxRateDate` e `iofFreeDate`),
+por usarem o mesmo DTO.
+
+O exemplo é o CDB prefixado a 10% a.a. da seção anterior, aplicado em 2025-04-01 e projetado em
+2025-04-22 (21 dias corridos):
+
+```json
+{
+  "netYield": 2.67,
+  "nextTaxRate": 20.0,
+  "nextTaxRateDate": "2025-09-29",
+  "iofFreeDate": "2025-05-01"
+}
+```
+
+`nextTaxRateDate` cai numa segunda-feira, e `iofFreeDate` cai num feriado, sem ajuste.
+
+No consolidado, `byAsset` traz um item por título com pelo menos uma posição incluída, na ordem em
+que cada título aparece pela primeira vez em `positions`. Cada item tem `assetId`, `positionCount`
+e os totais com os mesmos nomes da raiz (`totalInvestedAmount`, `totalGrossAmount`,
+`totalGrossYield`, `totalTaxAmount`, `totalIofAmount`, `totalNetAmount`), mais `totalNetYield`. Cada
+total é a soma dos itens de `positions` daquele título. `byAsset` não traz marca de estimado nem de
+projetado: quem exibe olha `isEstimated` e `isProjected` nos itens de `positions` do título. Carteira
+vazia devolve lista vazia.
+
+```json
+{
+  "byAsset": [
+    {
+      "assetId": "…", "positionCount": 2,
+      "totalInvestedAmount": 2000, "totalGrossAmount": 2009.86, "totalGrossYield": 9.86,
+      "totalTaxAmount": 1.56, "totalIofAmount": 2.96, "totalNetAmount": 2005.34,
+      "totalNetYield": 5.34
+    }
+  ]
+}
+```
+
 ### Variação acumulada de um indexador
 
 `GET /api/indexes/{indexType}/accumulated?from=&to=` devolve a variação acumulada de CDI ou de
@@ -981,7 +1043,7 @@ Os scripts `.sh` de `infra/aws/` são sempre chamados com `bash` e não dependem
 dotnet test
 ```
 
-863 testes, executados a cada push pelo GitHub Actions.
+975 testes, executados a cada push pelo GitHub Actions.
 
 **Docker precisa estar em execução.** Os testes de repositório (`FixedIncome.Infrastructure.Tests`)
 e de ponta a ponta (`FixedIncome.Api.Tests`) rodam contra um PostgreSQL 16 real, subido pelo
@@ -1000,10 +1062,10 @@ dotnet test tests/FixedIncome.Architecture.Tests
 
 | Camada | Testes | Linha | Branch |
 |---|---|---|---|
-| Domain | 411 | 97,1% | 100% |
-| Application | 184 | 94,7% | 99,0% |
+| Domain | 505 | 97,5% | 100% |
+| Application | 196 | 95,0% | 99,0% |
 | Infrastructure | 173 | 99,7% | 98,4% |
-| Api | 87 | 96,7% | 91,7% |
+| Api | 93 | 96,7% | 91,7% |
 | Architecture | 8 | sem cobertura | sem cobertura |
 
 O projeto `FixedIncome.Architecture.Tests` só verifica dependências entre camadas e não tem código de
